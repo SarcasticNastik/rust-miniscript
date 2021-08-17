@@ -49,7 +49,9 @@ impl<'a> Tree<'a> {
         enum Found {
             Nothing,
             Lparen(usize),
+            Lbrace(usize),
             Comma(usize),
+            Rbrace(usize),
             Rparen(usize),
         }
 
@@ -59,9 +61,17 @@ impl<'a> Tree<'a> {
                 '(' => {
                     found = Found::Lparen(n);
                     break;
-                }
+                },
+                '{' => {
+                    found = Found::Lbrace(n);
+                    break;
+                },
                 ',' => {
                     found = Found::Comma(n);
+                    break;
+                },
+                '}' => {
+                    found  = Found::Rbrace(n);
                     break;
                 }
                 ')' => {
@@ -116,6 +126,10 @@ impl<'a> Tree<'a> {
             }
         }
     }
+
+    fn from_slice_helper_round() -> Result<Self, Error> {}
+
+    fn from_slice_helper_curly() -> Result<Self, Error> {}
 
     /// Parses a tree from a string
     pub fn from_str(s: &'a str) -> Result<Tree<'a>, Error> {
@@ -206,4 +220,6 @@ mod tests {
         assert!(parse_num("+6").is_err());
         assert!(parse_num("-6").is_err());
     }
+
+    // Add tests for tapscript parsing
 }

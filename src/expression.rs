@@ -202,8 +202,8 @@ impl<'a> Tree<'a> {
 
                     sl = &new_sl[1..];
                     match new_sl.as_bytes()[0] {
+                        b',' => {}
                         b')' => break,
-                        c if i == 0 && c != b',' => return Err(Error::ExpectedChar(',')),
                         _ => return Err(Error::ExpectedChar(')')),
                     }
                 }

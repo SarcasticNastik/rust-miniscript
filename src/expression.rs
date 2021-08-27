@@ -216,6 +216,7 @@ impl<'a> Tree<'a> {
         mut sl: &'a str,
         depth: u32,
     ) -> Result<(Tree<'a>, &'a str), Error> {
+        // contain the context of brackets
         if depth >= MAX_RECURSION_DEPTH {
             return Err(Error::MaxRecursiveDepthExceeded);
         }

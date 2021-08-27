@@ -35,8 +35,10 @@ where
 {
     pub fn to_string_no_checksum(&self) -> String {
         match self {
-            TapTree::Tree(ref left, ref right) => format!("{{{},{}}}", *left, *right),
-            TapTree::Miniscript_(_, ref miniscript) => format!("{}", *miniscript),
+            TapTree::Tree(ref left, ref right) => {
+                format!("{{{},{}}}", *left.clone(), *right.clone())
+            }
+            TapTree::Miniscript_(_, ref script) => format!("{}", *script.clone()),
         }
     }
 }
@@ -51,7 +53,7 @@ where
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let desc = self.to_string_no_checksum();
         // let checksum = desc_checksum(&desc).map_err(|_| fmt::Error)?;
-        // write!(f, "{}", &desc)
+        // write!(f, "{}#{}", &desc, &checksum)
         write!(f, "{}", &desc)
     }
 }
@@ -83,7 +85,7 @@ where
 
     // helper function for semantic parsing of script paths
     pub fn tr_script_path(tree: &Tree) -> Result<TapTree<Pk>, Error> {
-        match tree {
+        match dbg!(tree) {
             Tree { name, args } if name.len() > 0 && args.len() == 0 => {
                 // children nodes
                 let script = name;
@@ -112,7 +114,7 @@ where
     }
 }
 
-impl<Pk> FromTree for Tr<Pk>
+impl<Pk: MiniscriptKey> FromTree for Tr<Pk>
 where
     Pk: MiniscriptKey + FromStr,
     Pk::Hash: FromStr,
@@ -120,7 +122,7 @@ where
     <<Pk as MiniscriptKey>::Hash as FromStr>::Err: ToString,
 {
     fn from_tree(top: &Tree) -> Result<Self, Error> {
-        if top.name == "tr" {
+        if dbg!(top).name == "tr" {
             match top.args.len() {
                 1 => {
                     let key = &top.args[0];
@@ -168,7 +170,7 @@ where
     }
 }
 
-impl<Pk> FromStr for Tr<Pk>
+impl<Pk: MiniscriptKey> FromStr for Tr<Pk>
 where
     Pk: MiniscriptKey + FromStr,
     Pk::Hash: FromStr,
@@ -193,9 +195,10 @@ where
     <<Pk as MiniscriptKey>::Hash as FromStr>::Err: ToString,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let key = &self.key_path;
         match self.script_path {
-            Some(ref s) => write!(f, "tr({},{})", self.key_path, s),
-            None => write!(f, "tr({})", self.key_path),
+            Some(ref s) => write!(f, "tr({},{})", key, s),
+            None => write!(f, "tr({})", key),
         }
     }
 }

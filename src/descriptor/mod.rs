@@ -51,6 +51,7 @@ pub use self::bare::{Bare, Pkh};
 pub use self::segwitv0::{Wpkh, Wsh, WshInner};
 pub use self::sh::{Sh, ShInner};
 pub use self::sortedmulti::SortedMultiVec;
+pub use self::tr::Tr;
 
 mod checksum;
 mod key;
@@ -168,6 +169,9 @@ pub enum Descriptor<Pk: MiniscriptKey> {
     Sh(Sh<Pk>),
     /// Pay-to-Witness-ScriptHash with Segwitv0 context
     Wsh(Wsh<Pk>),
+    // /// Pay-to-Taproot with Segwitv0 context
+    // /// TODO: Update context to Segwitv1
+    // Tr(Tr<Pk>)
 }
 
 /// Descriptor Type of the descriptor
@@ -193,6 +197,8 @@ pub enum DescriptorType {
     WshSortedMulti,
     /// Sh Wsh Sorted Multi
     ShWshSortedMulti,
+    // /// Tr Descriptor
+    // Tr
 }
 
 impl<Pk: MiniscriptKey> Descriptor<Pk> {
@@ -279,6 +285,12 @@ impl<Pk: MiniscriptKey> Descriptor<Pk> {
         Ok(Descriptor::Wsh(Wsh::new_sortedmulti(k, pks)?))
     }
 
+    // /// Create new tr descriptor
+    // /// Errors when miniscript exceeds resource limits under Segwitv0 context
+    // pub fn new_tr(key: Pk, script: Option<tr::TapTree<Pk>>) -> Result<Self, Error> {
+    //     Ok(Descriptor::Tr(Tr::new(key, script)?))
+    // }
+
     /// Get the [DescriptorType] of [Descriptor]
     pub fn desc_type(&self) -> DescriptorType {
         match *self {
@@ -298,6 +310,7 @@ impl<Pk: MiniscriptKey> Descriptor<Pk> {
                 WshInner::SortedMulti(ref _smv) => DescriptorType::WshSortedMulti,
                 WshInner::Ms(ref _ms) => DescriptorType::Wsh,
             },
+            // Descriptor::Tr(_) => DescriptorType::Tr,
         }
     }
 }
@@ -625,6 +638,7 @@ serde_string_impl_pk!(Descriptor, "a script descriptor");
 mod tests {
     use super::checksum::desc_checksum;
     use super::DescriptorTrait;
+    use super::{tr, Tr};
     use bitcoin::blockdata::opcodes::all::{OP_CLTV, OP_CSV};
     use bitcoin::blockdata::script::Instruction;
     use bitcoin::blockdata::{opcodes, script};
@@ -1087,6 +1101,61 @@ mod tests {
 
         assert_eq!(check, &Ok(Instruction::Op(OP_CSV)))
     }
+
+    #[test]
+    fn tr_roundtrip_key() {
+        // let descriptor = Tr::<bitcoin::PublicKey>::from_str(&format!("tr({})", TEST_PK)).unwrap();
+        let key = bitcoin::PublicKey::from_str(
+            "020000000000000000000000000000000000000000000000000000000000000002",
+        )
+        .unwrap();
+        let script = Tr::<bitcoin::PublicKey>::new(key, None)
+            .unwrap()
+            .to_string();
+
+        assert_eq!(
+            script,
+            format!("tr(020000000000000000000000000000000000000000000000000000000000000002)")
+        )
+    }
+
+    #[test]
+    fn tr_roundtrip_script() {
+        // let descriptor = Tr::<bitcoin::PublicKey>::from_str(&format!("tr({})", TEST_PK)).unwrap();
+        let k1 = "021111111111111111111111111111111111111111111111111111111111111112";
+        let k2 = "097942011111111111111111111111111111111111111111111111111111111112";
+        let k3 = "023333333333333333333333333333333333333333333333333333333333333332";
+        let k4 = "023333334495959959999999999999999999999999999999999999999999999932";
+        let descriptor = Tr::<bitcoin::PublicKey>::from_str(&format!(
+            "tr({},{{pk({}),or({},{})}})",
+            k1, k2, k3, k4
+        ))
+        .unwrap()
+        .to_string();
+
+        assert_eq!(
+            descriptor,
+            format!("tr({},{{pk({}),or({},{})}})", k1, k2, k3, k4)
+        )
+    }
+
+    // #[test]
+    // fn tr_roundtrip_tree() {
+    //     let k1 = "021111111111111111111111111111111111111111111111111111111111111112";
+    //     let k2 = "097942011111111111111111111111111111111111111111111111111111111112";
+    //     let k3 = "023333333333333333333333333333333333333333333333333333333333333332";
+    //     let k4 = "023333334495959959999999999999999999999999999999999999999999999932";
+    //     let descriptor = Tr::<bitcoin::PublicKey>::from_str(&format!(
+    //         "tr({},{{pk({}),{{or({},{}),and({},{})}}}})",
+    //         k1, k2, k3, k4
+    //     )).unwrap()
+    //       .to_string();
+    //
+    //     assert_eq!(
+    //         descriptor,
+    //         format!("tr({},{{pk({}),or({},{})}})", k1, k2, k3, k4)
+    //     )
+    // }
 
     #[test]
     fn roundtrip_tests() {

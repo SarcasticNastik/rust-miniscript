@@ -1,23 +1,15 @@
 // Tapscript
 
-use super::{
-    checksum::{desc_checksum, verify_checksum},
-    DescriptorTrait,
-};
+// use super::{
+//     checksum::{desc_checksum, verify_checksum},
+//     DescriptorTrait,
+// };
 use bitcoin::hashes::_export::_core::fmt::Formatter;
-use descriptor::tr::TapTree::Miniscript_;
 use expression::{self, FromTree, Tree};
-use miniscript::context::{ScriptContext, ScriptContextError};
-use policy::{semantic, Liftable};
 use std::sync::Arc;
 use std::{fmt, str::FromStr};
-use util::varint_len;
-use DummyKey;
-use {miniscript, Segwitv0};
-use {
-    miniscript::Miniscript, Error, ForEach, ForEachKey, MiniscriptKey, Satisfier, ToPublicKey,
-    TranslatePk,
-};
+use Segwitv0;
+use {miniscript::Miniscript, Error, MiniscriptKey};
 
 // TODO: Update this to infer version from descriptor.
 const VER: u8 = 0xc0;
@@ -34,6 +26,21 @@ pub struct Tr<Pk: MiniscriptKey> {
     script_path: Option<TapTree<Pk>>,
 }
 
+impl<Pk: MiniscriptKey> TapTree<Pk>
+where
+    Pk: MiniscriptKey + FromStr,
+    Pk::Hash: FromStr,
+    <Pk as FromStr>::Err: ToString,
+    <<Pk as MiniscriptKey>::Hash as FromStr>::Err: ToString,
+{
+    pub fn to_string_no_checksum(&self) -> String {
+        match self {
+            TapTree::Tree(ref left, ref right) => format!("{{{},{}}}", *left, *right),
+            TapTree::Miniscript_(_, ref miniscript) => format!("{}", *miniscript),
+        }
+    }
+}
+
 impl<Pk: MiniscriptKey> fmt::Display for TapTree<Pk>
 where
     Pk: MiniscriptKey + FromStr,
@@ -42,18 +49,10 @@ where
     <<Pk as MiniscriptKey>::Hash as FromStr>::Err: ToString,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            TapTree::Tree(left_tree, right_tree) => {
-                let left_tapscript = *left_tree.clone();
-                let right_tapscript = *right_tree.clone();
-                write!(f, "{{{},{}}}", left_tapscript, right_tapscript)
-            }
-            TapTree::Miniscript_(_, miniscript) => {
-                let miniscript = *miniscript.clone();
-                write!(f, "{}", miniscript)
-            }
-            _ => Error::new(format!("")),
-        }
+        let desc = self.to_string_no_checksum();
+        // let checksum = desc_checksum(&desc).map_err(|_| fmt::Error)?;
+        // write!(f, "{}", &desc)
+        write!(f, "{}", &desc)
     }
 }
 
@@ -65,10 +64,10 @@ where
     <<Pk as MiniscriptKey>::Hash as FromStr>::Err: ToString,
 {
     pub fn new(key_path: Pk, script_path: Option<TapTree<Pk>>) -> Result<Self, Error> {
-        Ok((Tr {
+        Ok(Tr {
             key_path,
             script_path,
-        }))
+        })
     }
 
     fn parse_miniscript(script: &str) -> Result<Miniscript<Pk, Segwitv0>, Error> {
@@ -179,8 +178,9 @@ where
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let desc_str = verify_checksum(s)?;
-        let top = expression::Tree::from_str(desc_str)?;
+        // let desc_str = verify_checksum(s)?;
+        // let top = expression::Tree::from_str(desc_str)?;
+        let top = expression::Tree::from_str(s)?;
         Self::from_tree(&top)
     }
 }
@@ -193,14 +193,9 @@ where
     <<Pk as MiniscriptKey>::Hash as FromStr>::Err: ToString,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.script_path.is_some() {
-            let Some(s) = self.script_path;
-            write!(f, "tr({},{})", self.key_path, s)
-        } else if self.script_path.is_none() {
-            write!(f, "tr({})", self.key_path)
-        }
-        else {
-
+        match self.script_path {
+            Some(ref s) => write!(f, "tr({},{})", self.key_path, s),
+            None => write!(f, "tr({})", self.key_path),
         }
     }
 }

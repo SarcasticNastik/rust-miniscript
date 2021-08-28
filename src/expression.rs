@@ -40,7 +40,7 @@ pub trait FromTree: Sized {
 impl<'a> Tree<'a> {
     pub fn from_slice(sl: &'a str) -> Result<(Tree<'a>, &'a str), Error> {
         // Parsing TapTree or just miniscript
-        if sl[0] == "{" {
+        if sl.contains("{") {
             Self::from_slice_helper_curly(sl, 0u32) // parser the tr descriptor
         } else {
             Self::from_slice_helper_round(sl, 0u32)
@@ -133,21 +133,32 @@ impl<'a> Tree<'a> {
         enum Found {
             Nothing,
             Lbrace(usize),
+            Lparen,
             Comma(usize),
+            Rparen,
             Rbrace(usize),
         }
 
         let mut found = Found::Nothing;
+        let mut new_count = 0;
         for (n, ch) in sl.char_indices() {
             match ch {
                 '{' => {
                     found = Found::Lbrace(n);
                     break;
-                }
+                },
+                '(' => {
+                    new_count += 1;
+                },
                 ',' => {
-                    found = Found::Comma(n);
-                    break;
-                }
+                    if new_count == 0 {
+                        found = Found::Comma(n);
+                        break;
+                    }
+                },
+                ')' => {
+                    new_count -= 1;
+                },
                 '}' => {
                     found = Found::Rbrace(n);
                     break;
@@ -158,7 +169,7 @@ impl<'a> Tree<'a> {
 
         match found {
             // String-ending terminal
-            Found::Nothing => Ok((
+            Found::Nothing | Found::Lparen | Found::Rparen => Ok((
                 Tree {
                     name: &sl[..],
                     args: vec![],
@@ -182,7 +193,7 @@ impl<'a> Tree<'a> {
 
                 sl = &sl[n + 1..];
                 loop {
-                    let (arg, new_sl) = Tree::from_slice_helper_curly_rec(sl, depth + 1)?;
+                    let (arg, new_sl) = Tree::from_slice_helper_curly(sl, depth + 1)?;
                     ret.args.push(arg);
 
                     if new_sl.is_empty() {

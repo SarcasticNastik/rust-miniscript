@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::{fmt, str::FromStr};
 use Segwitv0;
 use {miniscript::Miniscript, Error, MiniscriptKey};
+use crate::MAX_RECURSION_DEPTH;
 
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum TapTree<Pk: MiniscriptKey> {
@@ -55,7 +56,7 @@ where
     }
 }
 
-impl<Pk: MiniscriptKey> Tr<Pk>
+impl<'a, Pk: MiniscriptKey> Tr<Pk>
 where
     Pk: MiniscriptKey + FromStr,
     Pk::Hash: FromStr,
@@ -106,6 +107,83 @@ where
                     "unknown format for script spending paths while parsing taproot descriptor"
                         .to_string(),
                 ));
+            }
+        }
+    }
+
+    /// Helper function to parse Taproot Descriptor into key_path and TapTree
+    pub fn parse_tr(mut sl: &'a str, depth: u32) -> Result<(Tree<'a>, &'a str), Error> {
+        if depth >= MAX_RECURSION_DEPTH {
+            return Err(Error::MaxRecursiveDepthExceeded);
+        }
+
+        enum Found {
+            Nothing,
+            Lparen(usize),
+            Comma(usize),
+            Rparen(usize),
+        }
+
+        let mut found = Found::Nothing;
+        for (n, ch) in sl.char_indices() {
+            match ch {
+                '(' => {
+                    found = Found::Lparen(n);
+                    break;
+                }
+                ',' => {
+                    found = Found::Comma(n);
+                    break;
+                }
+                ')' => {
+                    found = Found::Rparen(n);
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        match found {
+            // String-ending terminal
+            Found::Nothing => Ok((
+                Tree {
+                    name: &sl[..],
+                    args: vec![],
+                },
+                "",
+            )),
+            // Terminal
+            Found::Comma(n) | Found::Rparen(n) => Ok((
+                Tree {
+                    name: &sl[..n],
+                    args: vec![],
+                },
+                &sl[n..],
+            )),
+            // Function call
+            Found::Lparen(n) => {
+                let mut ret = Tree {
+                    name: &sl[..n],
+                    args: vec![],
+                };
+
+                sl = &sl[n + 1..];
+                loop {
+                    let (arg, new_sl) = Tr::<Pk>::parse_tr(sl, depth + 1)?;
+                    ret.args.push(arg);
+
+                    if new_sl.is_empty() {
+                        return Err(Error::ExpectedChar(')'));
+                    }
+
+                    sl = &new_sl[1..];
+                    match new_sl.as_bytes()[0] {
+                        b',' => {}
+                        b')' => break,
+                        _ => return Err(Error::ExpectedChar(')')),
+                    }
+                }
+                Ok((ret, sl))
             }
         }
     }
@@ -176,90 +254,15 @@ where
 {
     type Err = Error;
 
-    fn from_slice_helper_curly(mut sl: &'a str, depth: u32) -> Result<(Tree<'a>, &'a str), Error> {
-        if depth >= MAX_RECURSION_DEPTH {
-            return Err(Error::MaxRecursiveDepthExceeded);
-        }
-
-        enum Found {
-            Nothing,
-            Lparen(usize),
-            Comma(usize),
-            Rparen(usize),
-        }
-
-        let mut found = Found::Nothing;
-        for (n, ch) in sl.char_indices() {
-            match ch {
-                '(' => {
-                    found = Found::Lparen(n);
-                    break;
-                }
-                ',' => {
-                    found = Found::Comma(n);
-                    break;
-                }
-                ')' => {
-                    found = Found::Rparen(n);
-                    break;
-                }
-                _ => {}
-            }
-        }
-
-        match found {
-            // String-ending terminal
-            Found::Nothing => Ok((
-                Tree {
-                    name: &sl[..],
-                    args: vec![],
-                },
-                "",
-            )),
-            // Terminal
-            Found::Comma(n) | Found::Rparen(n) => Ok((
-                Tree {
-                    name: &sl[..n],
-                    args: vec![],
-                },
-                &sl[n..],
-            )),
-            // Function call
-            Found::Lparen(n) => {
-                let mut ret = Tree {
-                    name: &sl[..n],
-                    args: vec![],
-                };
-
-                sl = &sl[n + 1..];
-                loop {
-                    let (arg, new_sl) = Tree::from_slice_helper_curly_rec(sl, depth + 1)?;
-                    ret.args.push(arg);
-
-                    if new_sl.is_empty() {
-                        return Err(Error::ExpectedChar(')'));
-                    }
-
-                    sl = &new_sl[1..];
-                    match new_sl.as_bytes()[0] {
-                        b',' => {}
-                        b')' => break,
-                        _ => return Err(Error::ExpectedChar(')')),
-                    }
-                }
-                Ok((ret, sl))
-            }
-        }
-    }
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         // let desc_str = verify_checksum(s)?;
         // let top = expression::Tree::from_str(desc_str)?;
 
-        // TODO: Parse the first level
         // Pass the TapTree then
-        let top = expression::Tree::from_str(s)?;
-        Self::from_tree(&top)
+        let (key, rest) = Tr::<Pk>::parse_tr(s, 0)?;
+        let top = expression::Tree::from_str(rest)?;
+        Self::from_tree(&top) // parse taptree and tapscript differently
     }
 }
 

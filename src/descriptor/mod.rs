@@ -1105,12 +1105,8 @@ mod tests {
     #[test]
     fn tr_roundtrip_key() {
         // let descriptor = Tr::<bitcoin::PublicKey>::from_str(&format!("tr({})", TEST_PK)).unwrap();
-        let key = bitcoin::PublicKey::from_str(
-            "020000000000000000000000000000000000000000000000000000000000000002",
-        )
-        .unwrap();
         // TODO: DummyKey
-        let script = Tr::<bitcoin::PublicKey>::new(key, None)
+        let script = Tr::<bitcoin::PublicKey>::from_str("tr(020000000000000000000000000000000000000000000000000000000000000002)")
             .unwrap()
             .to_string();
 

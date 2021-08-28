@@ -39,26 +39,13 @@ pub trait FromTree: Sized {
 
 impl<'a> Tree<'a> {
     pub fn from_slice(sl: &'a str) -> Result<(Tree<'a>, &'a str), Error> {
-        // Self::from_slice_helper(sl, 0u32)
-        if sl.contains("{") {
-            Self::from_slice_helper_curly(sl, 0u32)
+        // Parsing TapTree or just miniscript
+        if sl[0] == "{" {
+            Self::from_slice_helper_curly(sl, 0u32) // parser the tr descriptor
         } else {
             Self::from_slice_helper_round(sl, 0u32)
         }
     }
-
-    // fn from_slice_helper(mut sl: &'a str, depth: u32) -> Result<(Tree<'a>, &'a str), Error> {
-    //     if depth >= MAX_RECURSION_DEPTH {
-    //         return Err(Error::MaxRecursiveDepthExceeded);
-    //     }
-    //
-    //     if sl.contains("{") {
-    //         from_slice_helper_curly(sl, depth)
-    //     }
-    //     else {
-    //         from_slice_helper_round(sl, depth)
-    //     }
-    // }
 
     fn from_slice_helper_round(mut sl: &'a str, depth: u32) -> Result<(Tree<'a>, &'a str), Error> {
         if depth >= MAX_RECURSION_DEPTH {
@@ -135,84 +122,7 @@ impl<'a> Tree<'a> {
         }
     }
 
-    // tr(D,{or_i(pk(A),pk(B)),{after(9),pk(C)}})
-    fn from_slice_helper_curly(mut sl: &'a str, depth: u32) -> Result<(Tree<'a>, &'a str), Error> {
-        if depth >= MAX_RECURSION_DEPTH {
-            return Err(Error::MaxRecursiveDepthExceeded);
-        }
-
-        enum Found {
-            Nothing,
-            Lparen(usize),
-            Comma(usize),
-            Rparen(usize),
-        }
-
-        let mut found = Found::Nothing;
-        for (n, ch) in sl.char_indices() {
-            match ch {
-                '(' => {
-                    found = Found::Lparen(n);
-                    break;
-                }
-                ',' => {
-                    found = Found::Comma(n);
-                    break;
-                }
-                ')' => {
-                    found = Found::Rparen(n);
-                    break;
-                }
-                _ => {}
-            }
-        }
-
-        match found {
-            // String-ending terminal
-            Found::Nothing => Ok((
-                Tree {
-                    name: &sl[..],
-                    args: vec![],
-                },
-                "",
-            )),
-            // Terminal
-            Found::Comma(n) | Found::Rparen(n) => Ok((
-                Tree {
-                    name: &sl[..n],
-                    args: vec![],
-                },
-                &sl[n..],
-            )),
-            // Function call
-            Found::Lparen(n) => {
-                let mut ret = Tree {
-                    name: &sl[..n],
-                    args: vec![],
-                };
-
-                sl = &sl[n + 1..];
-                loop {
-                    let (arg, new_sl) = Tree::from_slice_helper_curly_rec(sl, depth + 1)?;
-                    ret.args.push(arg);
-
-                    if new_sl.is_empty() {
-                        return Err(Error::ExpectedChar(')'));
-                    }
-
-                    sl = &new_sl[1..];
-                    match new_sl.as_bytes()[0] {
-                        b',' => {}
-                        b')' => break,
-                        _ => return Err(Error::ExpectedChar(')')),
-                    }
-                }
-                Ok((ret, sl))
-            }
-        }
-    }
-
-    fn from_slice_helper_curly_rec(
+    fn from_slice_helper_curly(
         mut sl: &'a str,
         depth: u32,
     ) -> Result<(Tree<'a>, &'a str), Error> {

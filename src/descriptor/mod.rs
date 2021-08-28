@@ -1109,6 +1109,7 @@ mod tests {
             "020000000000000000000000000000000000000000000000000000000000000002",
         )
         .unwrap();
+        // TODO: DummyKey
         let script = Tr::<bitcoin::PublicKey>::new(key, None)
             .unwrap()
             .to_string();

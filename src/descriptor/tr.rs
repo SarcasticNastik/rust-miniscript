@@ -4,13 +4,13 @@
 //     checksum::{desc_checksum, verify_checksum},
 //     DescriptorTrait,
 // };
-use crate::MAX_RECURSION_DEPTH;
 use bitcoin::hashes::_export::_core::fmt::Formatter;
 use errstr;
 use expression::{self, FromTree, Tree};
 use std::sync::Arc;
 use std::{fmt, str::FromStr};
 use Segwitv0;
+use MAX_RECURSION_DEPTH;
 use {miniscript::Miniscript, Error, MiniscriptKey};
 
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
@@ -84,7 +84,7 @@ where
 
     // helper function for semantic parsing of script paths
     pub fn tr_script_path(tree: &Tree) -> Result<TapTree<Pk>, Error> {
-        match dbg!(tree) {
+        match tree {
             Tree { name, args } if name.len() > 0 && args.len() == 0 => {
                 // children nodes
                 let script = name;
@@ -121,7 +121,7 @@ where
     <<Pk as MiniscriptKey>::Hash as FromStr>::Err: ToString,
 {
     fn from_tree(top: &Tree) -> Result<Self, Error> {
-        if dbg!(top).name == "tr" {
+        if top.name == "tr" {
             match top.args.len() {
                 1 => {
                     let key = &top.args[0];
@@ -153,7 +153,7 @@ where
                 }
                 _ => {
                     return Err(Error::Unexpected(format!(
-                        "{}({} args) while parsing taproot descriptor",
+                        "{}[#{} args] while parsing taproot descriptor",
                         top.name,
                         top.args.len()
                     )));
@@ -161,7 +161,7 @@ where
             }
         } else {
             return Err(Error::Unexpected(format!(
-                "{}({} args) while parsing taproot descriptor",
+                "{}[#{} args] while parsing taproot descriptor",
                 top.name,
                 top.args.len()
             )));
@@ -277,7 +277,7 @@ fn parse_tr_helper<'a>(mut sl: &'a str, depth: u32) -> Result<(Tree<'a>, &'a str
             };
 
             sl = &sl[n + 1..];
-            let mut prev_sl: &str;
+            let mut prev_sl: &str = "";
             let mut prev_arg: Tree;
             loop {
                 if prev_sl.contains("{") {

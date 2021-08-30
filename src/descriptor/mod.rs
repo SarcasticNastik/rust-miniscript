@@ -638,7 +638,7 @@ serde_string_impl_pk!(Descriptor, "a script descriptor");
 mod tests {
     use super::checksum::desc_checksum;
     use super::DescriptorTrait;
-    use super::{tr, Tr};
+    use super::Tr;
     use bitcoin::blockdata::opcodes::all::{OP_CLTV, OP_CSV};
     use bitcoin::blockdata::script::Instruction;
     use bitcoin::blockdata::{opcodes, script};
@@ -1106,53 +1106,33 @@ mod tests {
     fn tr_roundtrip_key() {
         // let descriptor = Tr::<bitcoin::PublicKey>::from_str(&format!("tr({})", TEST_PK)).unwrap();
         // TODO: DummyKey
-        let script = Tr::<bitcoin::PublicKey>::from_str("tr(020000000000000000000000000000000000000000000000000000000000000002)")
-            .unwrap()
-            .to_string();
+        let script = Tr::<DummyKey>::from_str("tr()").unwrap().to_string();
 
-        assert_eq!(
-            script,
-            format!("tr(020000000000000000000000000000000000000000000000000000000000000002)")
-        )
+        assert_eq!(script, format!("tr()"))
     }
 
     #[test]
     fn tr_roundtrip_script() {
         // let descriptor = Tr::<bitcoin::PublicKey>::from_str(&format!("tr({})", TEST_PK)).unwrap();
-        let k1 = "021111111111111111111111111111111111111111111111111111111111111112";
-        let k2 = "097942011111111111111111111111111111111111111111111111111111111112";
-        let k3 = "023333333333333333333333333333333333333333333333333333333333333332";
-        let k4 = "023333334495959959999999999999999999999999999999999999999999999932";
-        let descriptor = Tr::<bitcoin::PublicKey>::from_str(&format!(
-            "tr({},{{pk({}),or({},{})}})",
-            k1, k2, k3, k4
-        ))
-        .unwrap()
-        .to_string();
+        let descriptor = Tr::<DummyKey>::from_str(&format!("tr(,{{pk(),pk()}})",))
+            .unwrap()
+            .to_string();
+
+        assert_eq!(descriptor, format!("tr(,{{pk(),pk()}})"))
+    }
+
+    #[test]
+    fn tr_roundtrip_tree() {
+        let descriptor =
+            Tr::<DummyKey>::from_str(&format!("tr(,{{pk(),{{pk(),or_d(pk(),pkh())}}}})",))
+                .unwrap()
+                .to_string();
 
         assert_eq!(
             descriptor,
-            format!("tr({},{{pk({}),or({},{})}})", k1, k2, k3, k4)
+            format!("tr(,{{pk(),{{pk(),or_d(pk(),pkh())}}}})")
         )
     }
-
-    // #[test]
-    // fn tr_roundtrip_tree() {
-    //     let k1 = "021111111111111111111111111111111111111111111111111111111111111112";
-    //     let k2 = "097942011111111111111111111111111111111111111111111111111111111112";
-    //     let k3 = "023333333333333333333333333333333333333333333333333333333333333332";
-    //     let k4 = "023333334495959959999999999999999999999999999999999999999999999932";
-    //     let descriptor = Tr::<bitcoin::PublicKey>::from_str(&format!(
-    //         "tr({},{{pk({}),{{or({},{}),and({},{})}}}})",
-    //         k1, k2, k3, k4
-    //     )).unwrap()
-    //       .to_string();
-    //
-    //     assert_eq!(
-    //         descriptor,
-    //         format!("tr({},{{pk({}),or({},{})}})", k1, k2, k3, k4)
-    //     )
-    // }
 
     #[test]
     fn roundtrip_tests() {

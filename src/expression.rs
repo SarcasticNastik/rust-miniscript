@@ -133,9 +133,7 @@ impl<'a> Tree<'a> {
         enum Found {
             Nothing,
             Lbrace(usize),
-            Lparen,
             Comma(usize),
-            Rparen,
             Rbrace(usize),
         }
 
@@ -169,7 +167,7 @@ impl<'a> Tree<'a> {
 
         match found {
             // String-ending terminal
-            Found::Nothing | Found::Lparen | Found::Rparen => Ok((
+            Found::Nothing => Ok((
                 Tree {
                     name: &sl[..],
                     args: vec![],

@@ -1104,17 +1104,13 @@ mod tests {
 
     #[test]
     fn tr_roundtrip_key() {
-        // let descriptor = Tr::<bitcoin::PublicKey>::from_str(&format!("tr({})", TEST_PK)).unwrap();
-        // TODO: DummyKey
         let script = Tr::<DummyKey>::from_str("tr()").unwrap().to_string();
-
         assert_eq!(script, format!("tr()"))
     }
 
     #[test]
     fn tr_roundtrip_script() {
-        // let descriptor = Tr::<bitcoin::PublicKey>::from_str(&format!("tr({})", TEST_PK)).unwrap();
-        let descriptor = Tr::<DummyKey>::from_str(&format!("tr(,{{pk(),pk()}})",))
+        let descriptor = Tr::<DummyKey>::from_str(&format!("tr(,{{pk(),pk()}})"))
             .unwrap()
             .to_string();
 
@@ -1124,7 +1120,7 @@ mod tests {
     #[test]
     fn tr_roundtrip_tree() {
         let descriptor =
-            Tr::<DummyKey>::from_str(&format!("tr(,{{pk(),{{pk(),or_d(pk(),pkh())}}}})",))
+            Tr::<DummyKey>::from_str(&format!("tr(,{{pk(),{{pk(),or_d(pk(),pkh())}}}})"))
                 .unwrap()
                 .to_string();
 

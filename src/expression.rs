@@ -122,7 +122,7 @@ impl<'a> Tree<'a> {
         }
     }
 
-    fn from_slice_helper_curly(
+    pub fn from_slice_helper_curly(
         mut sl: &'a str,
         depth: u32,
     ) -> Result<(Tree<'a>, &'a str), Error> {
@@ -146,19 +146,19 @@ impl<'a> Tree<'a> {
                 '{' => {
                     found = Found::Lbrace(n);
                     break;
-                },
+                }
                 '(' => {
                     new_count += 1;
-                },
+                }
                 ',' => {
                     if new_count == 0 {
                         found = Found::Comma(n);
                         break;
                     }
-                },
+                }
                 ')' => {
                     new_count -= 1;
-                },
+                }
                 '}' => {
                     found = Found::Rbrace(n);
                     break;

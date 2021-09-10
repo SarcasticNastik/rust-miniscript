@@ -67,6 +67,8 @@ pub enum ScriptContextError {
     TaprootMultiDisabled,
     /// Stack size exceeded in script execution
     StackSizeLimitExceeded { actual: usize, limit: usize },
+    /// MultiA is only allowed in post tapscript
+    MultiANotAllowed,
 }
 
 impl fmt::Display for ScriptContextError {
@@ -131,6 +133,9 @@ impl fmt::Display for ScriptContextError {
                     "Stack limit {} can exceed the allowed limit {} in at least one script path during script execution",
                     actual, limit
                 )
+            }
+            ScriptContextError::MultiANotAllowed => {
+                write!(f, "Multi a(CHECKSIGADD) only allowed post tapscript")
             }
         }
     }
@@ -323,6 +328,9 @@ impl ScriptContext for Legacy {
         if ms.ext.pk_cost > MAX_SCRIPT_ELEMENT_SIZE {
             return Err(ScriptContextError::MaxRedeemScriptSizeExceeded);
         }
+        if let Terminal::MultiA(..) = ms.node {
+            return Err(ScriptContextError::MultiANotAllowed);
+        }
         Ok(())
     }
 
@@ -414,6 +422,9 @@ impl ScriptContext for Segwitv0 {
                     }
                 }
                 Ok(())
+            }
+            Terminal::MultiA(..) => {
+                return Err(ScriptContextError::MultiANotAllowed);
             }
             _ => Ok(()),
         }
@@ -605,6 +616,9 @@ impl ScriptContext for BareCtx {
     ) -> Result<(), ScriptContextError> {
         if ms.ext.pk_cost > MAX_SCRIPT_SIZE {
             return Err(ScriptContextError::MaxWitnessScriptSizeExceeded);
+        }
+        if let Terminal::MultiA(..) = ms.node {
+            return Err(ScriptContextError::MultiANotAllowed);
         }
         Ok(())
     }

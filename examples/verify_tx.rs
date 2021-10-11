@@ -139,8 +139,8 @@ fn main() {
         .expect("Can only fail in sighash single when corresponding output is not present");
     // Restrict to sighash_all just to demonstrate how to add additional filters
     // `&_` needed here because of https://github.com/rust-lang/rust/issues/79187
-    let vfyfn = move |pk: &_, bitcoinsig: miniscript::BitcoinSig| {
-        bitcoinsig.1 == bitcoin::EcdsaSigHashType::All && vfyfn(pk, bitcoinsig)
+    let vfyfn = move |pk: &_, bitcoinsig: miniscript::bitcoin::EcdsaSig| {
+        bitcoinsig.hash_ty == bitcoin::EcdsaSigHashType::All && vfyfn(pk, bitcoinsig)
     };
 
     println!("\nExample two");
@@ -167,9 +167,9 @@ fn main() {
     )
     .unwrap();
 
-    let iter = interpreter.iter(|pk, (sig, sighashtype)| {
-        sighashtype == bitcoin::EcdsaSigHashType::All
-            && secp.verify(&message, &sig, &pk.key).is_ok()
+    let iter = interpreter.iter(|pk, ecdsa_sig| {
+        ecdsa_sig.hash_ty == bitcoin::EcdsaSigHashType::All
+            && secp.verify(&message, &ecdsa_sig.sig, &pk.key).is_ok()
     });
     println!("\nExample three");
     for elem in iter {

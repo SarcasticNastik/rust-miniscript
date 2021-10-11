@@ -20,7 +20,7 @@
 //!
 
 use bitcoin::hashes::{hash160, ripemd160, sha256, sha256d};
-use bitcoin::util::bip143;
+use bitcoin::util::sighash;
 use bitcoin::{self, secp256k1};
 use miniscript::context::NoChecks;
 use miniscript::ScriptContext;
@@ -169,17 +169,17 @@ impl<'txin> Interpreter<'txin> {
         unsigned_tx: &bitcoin::Transaction,
         input_idx: usize,
         amount: u64,
-        sighash_type: bitcoin::SigHashType,
-    ) -> secp256k1::Message {
+        sighash_type: bitcoin::EcdsaSigHashType,
+    ) -> Result<secp256k1::Message, Error> {
+        let mut cache = sighash::SigHashCache::new(unsigned_tx);
         let hash = if self.is_legacy() {
-            unsigned_tx.signature_hash(input_idx, &self.script_code, sighash_type.as_u32())
+            cache.legacy_signature_hash(input_idx, &self.script_code, sighash_type.as_u32())?
         } else {
-            let mut sighash_cache = bip143::SigHashCache::new(unsigned_tx);
-            sighash_cache.signature_hash(input_idx, &self.script_code, amount, sighash_type)
+            cache.segwit_signature_hash(input_idx, &self.script_code, amount, sighash_type)?
         };
 
-        secp256k1::Message::from_slice(&hash[..])
-            .expect("cryptographically unreachable for this to fail")
+        Ok(secp256k1::Message::from_slice(&hash[..])
+            .expect("cryptographically unreachable for this to fail"))
     }
 
     /// Returns a closure which can be given to the `iter` method to check all signatures
@@ -189,46 +189,61 @@ impl<'txin> Interpreter<'txin> {
         unsigned_tx: &'a bitcoin::Transaction,
         input_idx: usize,
         amount: u64,
-    ) -> impl Fn(&bitcoin::PublicKey, BitcoinSig) -> bool + 'a {
+    ) -> Result<impl Fn(&bitcoin::PublicKey, BitcoinSig) -> bool + 'a, Error> {
         // Precompute all sighash types because the borrowck doesn't like us
         // pulling self into the closure
         let sighashes = [
-            self.sighash_message(unsigned_tx, input_idx, amount, bitcoin::SigHashType::All),
-            self.sighash_message(unsigned_tx, input_idx, amount, bitcoin::SigHashType::None),
-            self.sighash_message(unsigned_tx, input_idx, amount, bitcoin::SigHashType::Single),
             self.sighash_message(
                 unsigned_tx,
                 input_idx,
                 amount,
-                bitcoin::SigHashType::AllPlusAnyoneCanPay,
-            ),
+                bitcoin::EcdsaSigHashType::All,
+            )?,
             self.sighash_message(
                 unsigned_tx,
                 input_idx,
                 amount,
-                bitcoin::SigHashType::NonePlusAnyoneCanPay,
-            ),
+                bitcoin::EcdsaSigHashType::None,
+            )?,
             self.sighash_message(
                 unsigned_tx,
                 input_idx,
                 amount,
-                bitcoin::SigHashType::SinglePlusAnyoneCanPay,
-            ),
+                bitcoin::EcdsaSigHashType::Single,
+            )?,
+            self.sighash_message(
+                unsigned_tx,
+                input_idx,
+                amount,
+                bitcoin::EcdsaSigHashType::AllPlusAnyoneCanPay,
+            )?,
+            self.sighash_message(
+                unsigned_tx,
+                input_idx,
+                amount,
+                bitcoin::EcdsaSigHashType::NonePlusAnyoneCanPay,
+            )?,
+            self.sighash_message(
+                unsigned_tx,
+                input_idx,
+                amount,
+                bitcoin::EcdsaSigHashType::SinglePlusAnyoneCanPay,
+            )?,
         ];
 
-        move |pk: &bitcoin::PublicKey, (sig, sighash_type)| {
+        Ok(move |pk: &bitcoin::PublicKey, (sig, sighash_type)| {
             // This is an awkward way to do this lookup, but it lets us do exhaustiveness
             // checking in case future rust-bitcoin versions add new sighash types
             let sighash = match sighash_type {
-                bitcoin::SigHashType::All => sighashes[0],
-                bitcoin::SigHashType::None => sighashes[1],
-                bitcoin::SigHashType::Single => sighashes[2],
-                bitcoin::SigHashType::AllPlusAnyoneCanPay => sighashes[3],
-                bitcoin::SigHashType::NonePlusAnyoneCanPay => sighashes[4],
-                bitcoin::SigHashType::SinglePlusAnyoneCanPay => sighashes[5],
+                bitcoin::EcdsaSigHashType::All => sighashes[0],
+                bitcoin::EcdsaSigHashType::None => sighashes[1],
+                bitcoin::EcdsaSigHashType::Single => sighashes[2],
+                bitcoin::EcdsaSigHashType::AllPlusAnyoneCanPay => sighashes[3],
+                bitcoin::EcdsaSigHashType::NonePlusAnyoneCanPay => sighashes[4],
+                bitcoin::EcdsaSigHashType::SinglePlusAnyoneCanPay => sighashes[5],
             };
             secp.verify(&sighash, &sig, &pk.key).is_ok()
-        }
+        })
     }
 }
 
@@ -757,7 +772,7 @@ where
     F: FnOnce(&bitcoin::PublicKey, BitcoinSig) -> bool,
 {
     if let Some((sighash_byte, sig)) = sigser.split_last() {
-        let sighashtype = bitcoin::SigHashType::from_u32_standard(*sighash_byte as u32)
+        let sighashtype = bitcoin::EcdsaSigHashType::from_u32_standard(*sighash_byte as u32)
             .map_err(|_| Error::NonStandardSigHash([sig, &[*sighash_byte]].concat().to_vec()))?;
         let sig = secp256k1::Signature::from_der(sig)?;
         if verify_sig(pk, (sig, sighashtype)) {

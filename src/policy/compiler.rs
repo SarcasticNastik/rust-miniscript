@@ -1161,7 +1161,7 @@ where
 mod tests {
     use super::*;
     use bitcoin::blockdata::{opcodes, script};
-    use bitcoin::{self, hashes, secp256k1, SigHashType};
+    use bitcoin::{self, hashes, secp256k1, EcdsaSigHashType};
     use std::collections::HashMap;
     use std::str::FromStr;
     use std::string::String;
@@ -1364,7 +1364,7 @@ mod tests {
         assert_eq!(abs.n_keys(), 5);
         assert_eq!(abs.minimum_n_keys(), Some(3));
 
-        let bitcoinsig = (sig, SigHashType::All);
+        let bitcoinsig = (sig, EcdsaSigHashType::All);
         let mut sigvec = sig.serialize_der().to_vec();
         sigvec.push(1); // sighash all
 

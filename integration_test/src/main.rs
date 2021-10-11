@@ -198,7 +198,7 @@ fn main() {
         // Get the required sighash message
         let amt = btc(1).as_sat();
         let mut sighash_cache = bip143::SigHashCache::new(&psbts[i].global.unsigned_tx);
-        let sighash_ty = bitcoin::SigHashType::All;
+        let sighash_ty = bitcoin::EcdsaSigHashType::All;
         let sighash = sighash_cache.signature_hash(0, &ms.encode(), amt, sighash_ty);
 
         // requires both signing and verification because we check the tx

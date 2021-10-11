@@ -35,7 +35,7 @@ fn get_scriptpubkey(psbt: &Psbt, index: usize) -> Result<&Script, InputError> {
     if let Some(ref witness_utxo) = inp.witness_utxo {
         script_pubkey = &witness_utxo.script_pubkey;
     } else if let Some(ref non_witness_utxo) = inp.non_witness_utxo {
-        let vout = psbt.global.unsigned_tx.input[index].previous_output.vout;
+        let vout = psbt.unsigned_tx.input[index].previous_output.vout;
         script_pubkey = &non_witness_utxo.output[vout as usize].script_pubkey;
     } else {
         return Err(InputError::MissingUtxo);
@@ -50,7 +50,7 @@ fn get_amt(psbt: &Psbt, index: usize) -> Result<u64, InputError> {
     if let Some(ref witness_utxo) = inp.witness_utxo {
         amt = witness_utxo.value;
     } else if let Some(ref non_witness_utxo) = inp.non_witness_utxo {
-        let vout = psbt.global.unsigned_tx.input[index].previous_output.vout;
+        let vout = psbt.unsigned_tx.input[index].previous_output.vout;
         amt = non_witness_utxo.output[vout as usize].value;
     } else {
         return Err(InputError::MissingUtxo);
@@ -219,15 +219,17 @@ pub fn interpreter_check<C: secp256k1::Verification>(
         // Now look at all the satisfied constraints. If everything is filled in
         // corrected, there should be no errors
 
-        let cltv = psbt.global.unsigned_tx.lock_time;
-        let csv = psbt.global.unsigned_tx.input[index].sequence;
+        let cltv = psbt.unsigned_tx.lock_time;
+        let csv = psbt.unsigned_tx.input[index].sequence;
         let amt = get_amt(psbt, index).map_err(|e| Error::InputError(e, index))?;
 
         let mut interpreter =
             interpreter::Interpreter::from_txdata(spk, &script_sig, &witness, cltv, csv)
                 .map_err(|e| Error::InputError(InputError::Interpreter(e), index))?;
 
-        let vfyfn = interpreter.sighash_verify(&secp, &psbt.global.unsigned_tx, index, amt);
+        let vfyfn = interpreter
+            .sighash_verify(&secp, &psbt.unsigned_tx, index, amt)
+            .map_err(|e| Error::InputError(InputError::Interpreter(e), index))?;
         if let Some(error) = interpreter.iter(vfyfn).filter_map(Result::err).next() {
             return Err(Error::InputError(InputError::Interpreter(error), index));
         }
@@ -268,7 +270,7 @@ pub fn finalize_helper<C: secp256k1::Verification>(
 
     // Check well-formedness of input data
     for (n, input) in psbt.inputs.iter().enumerate() {
-        let target = input.sighash_type.unwrap_or(bitcoin::SigHashType::All);
+        let target = input.sighash_type.unwrap_or(bitcoin::EcdsaSigHashType::All);
         for (key, rawsig) in &input.partial_sigs {
             if rawsig.is_empty() {
                 return Err(Error::InputError(
@@ -280,14 +282,15 @@ pub fn finalize_helper<C: secp256k1::Verification>(
                 ));
             }
             let (flag, sig) = rawsig.split_last().unwrap();
-            let flag = bitcoin::SigHashType::from_u32_standard(*flag as u32).map_err(|_| {
-                super::Error::InputError(
-                    InputError::Interpreter(interpreter::Error::NonStandardSigHash(
-                        [sig, &[*flag]].concat().to_vec(),
-                    )),
-                    n,
-                )
-            })?;
+            let flag =
+                bitcoin::EcdsaSigHashType::from_u32_standard(*flag as u32).map_err(|_| {
+                    super::Error::InputError(
+                        InputError::Interpreter(interpreter::Error::NonStandardSigHash(
+                            [sig, &[*flag]].concat().to_vec(),
+                        )),
+                        n,
+                    )
+                })?;
             if target != flag {
                 return Err(Error::InputError(
                     InputError::WrongSigHashFlag {

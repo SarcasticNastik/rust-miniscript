@@ -134,7 +134,9 @@ fn main() {
 
     // We can set the amount passed to `sighash_verify` to 0 because this is a legacy
     // transaction and so the amount won't actually be checked by the signature
-    let vfyfn = interpreter.sighash_verify(&secp, &transaction, 0, 0);
+    let vfyfn = interpreter
+        .sighash_verify(&secp, &transaction, 0, 0)
+        .expect("Can only fail in sighash single when corresponding output is not present");
     // Restrict to sighash_all just to demonstrate how to add additional filters
     // `&_` needed here because of https://github.com/rust-lang/rust/issues/79187
     let vfyfn = move |pk: &_, bitcoinsig: miniscript::BitcoinSig| {

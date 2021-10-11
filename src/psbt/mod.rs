@@ -253,8 +253,8 @@ impl<'psbt, Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for PsbtInputSatisfie
     }
 
     fn check_after(&self, n: u32) -> bool {
-        let locktime = self.psbt.global.unsigned_tx.lock_time;
-        let seq = self.psbt.global.unsigned_tx.input[self.index].sequence;
+        let locktime = self.psbt.unsigned_tx.lock_time;
+        let seq = self.psbt.unsigned_tx.input[self.index].sequence;
 
         // https://github.com/bitcoin/bips/blob/master/bip-0065.mediawiki
         // fail if TxIn is finalized
@@ -266,14 +266,12 @@ impl<'psbt, Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for PsbtInputSatisfie
     }
 
     fn check_older(&self, n: u32) -> bool {
-        let seq = self.psbt.global.unsigned_tx.input[self.index].sequence;
+        let seq = self.psbt.unsigned_tx.input[self.index].sequence;
         // https://github.com/bitcoin/bips/blob/master/bip-0112.mediawiki
         // Disable flag set. return true
         if n & SEQUENCE_LOCKTIME_DISABLE_FLAG != 0 {
             true
-        } else if self.psbt.global.unsigned_tx.version < 2
-            || (seq & SEQUENCE_LOCKTIME_DISABLE_FLAG != 0)
-        {
+        } else if self.psbt.unsigned_tx.version < 2 || (seq & SEQUENCE_LOCKTIME_DISABLE_FLAG != 0) {
             // transaction version and sequence check
             false
         } else {
@@ -321,9 +319,9 @@ fn try_vec_as_preimage32(vec: &Vec<u8>) -> Option<Preimage32> {
 }
 
 fn sanity_check(psbt: &Psbt) -> Result<(), Error> {
-    if psbt.global.unsigned_tx.input.len() != psbt.inputs.len() {
+    if psbt.unsigned_tx.input.len() != psbt.inputs.len() {
         return Err(Error::WrongInputCount {
-            in_tx: psbt.global.unsigned_tx.input.len(),
+            in_tx: psbt.unsigned_tx.input.len(),
             in_map: psbt.inputs.len(),
         }
         .into());
@@ -343,7 +341,7 @@ pub fn extract<C: secp256k1::Verification>(
 ) -> Result<bitcoin::Transaction, Error> {
     sanity_check(psbt)?;
 
-    let mut ret = psbt.global.unsigned_tx.clone();
+    let mut ret = psbt.unsigned_tx.clone();
     for (n, input) in psbt.inputs.iter().enumerate() {
         if input.final_script_sig.is_none() && input.final_script_witness.is_none() {
             return Err(Error::InputError(InputError::MissingWitness, n));

@@ -475,6 +475,8 @@ pub enum Error {
     InvalidPush(Vec<u8>),
     /// rust-bitcoin script error
     Script(script::Error),
+    /// rust-bitcoin address error
+    AddrError(bitcoin::util::address::Error),
     /// A `CHECKMULTISIG` opcode was preceded by a number > 20
     CmsTooManyKeys(u32),
     /// Encountered unprintable character in descriptor
@@ -582,6 +584,13 @@ impl From<bitcoin::secp256k1::Error> for Error {
     }
 }
 
+#[doc(hidden)]
+impl From<bitcoin::util::address::Error> for Error {
+    fn from(e: bitcoin::util::address::Error) -> Error {
+        Error::AddrError(e)
+    }
+}
+
 fn errstr(s: &str) -> Error {
     Error::Unexpected(s.to_owned())
 }
@@ -607,6 +616,7 @@ impl fmt::Display for Error {
             Error::NonMinimalVerify(ref tok) => write!(f, "{} VERIFY", tok),
             Error::InvalidPush(ref push) => write!(f, "invalid push {:?}", push), // TODO hexify this
             Error::Script(ref e) => fmt::Display::fmt(e, f),
+            Error::AddrError(ref e) => fmt::Display::fmt(e, f),
             Error::CmsTooManyKeys(n) => write!(f, "checkmultisig with {} keys", n),
             Error::Unprintable(x) => write!(f, "unprintable character 0x{:02x}", x),
             Error::ExpectedChar(c) => write!(f, "expected {}", c),

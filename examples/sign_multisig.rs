@@ -18,7 +18,7 @@ extern crate bitcoin;
 extern crate miniscript;
 
 use bitcoin::secp256k1; // secp256k1 re-exported from rust-bitcoin
-use miniscript::DescriptorTrait;
+use miniscript::{BitcoinECSig, DescriptorTrait};
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -60,10 +60,10 @@ fn main() {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ]).expect("key 3"),
     ];
-    let bitcoin_sig = (
+    let bitcoin_sig = BitcoinECSig {
         // copied at random off the blockchain; this is not actually a valid
         // signature for this transaction; Miniscript does not verify
-        secp256k1::Signature::from_str(
+        sig: secp256k1::Signature::from_str(
             "3045\
              0221\
              00f7c3648c390d87578cd79c8016940aa8e3511c4104cb78daa8fb8e429375efc1\
@@ -71,8 +71,8 @@ fn main() {
              531d75c136272f127a5dc14acc0722301cbddc222262934151f140da345af177",
         )
         .unwrap(),
-        bitcoin::SigHashType::All,
-    );
+        hash_ty: bitcoin::SigHashType::All,
+    };
 
     let descriptor_str = format!(
         "wsh(multi(2,{},{},{}))",

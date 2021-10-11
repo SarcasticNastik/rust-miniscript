@@ -1363,7 +1363,10 @@ mod tests {
         assert_eq!(abs.n_keys(), 5);
         assert_eq!(abs.minimum_n_keys(), Some(3));
 
-        let bitcoinsig = (sig, SigHashType::All);
+        let bitcoinsig = BitcoinECSig {
+            sig: sig,
+            hash_ty: SigHashType::All,
+        };
         let mut sigvec = sig.serialize_der().to_vec();
         sigvec.push(1); // sighash all
 

@@ -324,11 +324,9 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Pkh<Pk> {
         Pk: ToPublicKey,
         S: Satisfier<Pk>,
     {
-        if let Some(sig) = satisfier.lookup_ec_sig(&self.pk) {
-            let mut sig_vec = sig.0.serialize_der().to_vec();
-            sig_vec.push(sig.1.as_u32() as u8);
+        if let Some(btc_sig) = satisfier.lookup_ec_sig(&self.pk) {
             let script_sig = script::Builder::new()
-                .push_slice(&sig_vec[..])
+                .push_slice(&btc_sig.serialize())
                 .push_key(&self.pk.to_public_key())
                 .into_script();
             let witness = vec![];

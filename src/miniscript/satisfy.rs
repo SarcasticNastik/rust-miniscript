@@ -34,21 +34,41 @@ use Miniscript;
 use ScriptContext;
 use Terminal;
 
-/// Type alias for a signature/hashtype pair
-pub type BitcoinECSig = (secp256k1::Signature, bitcoin::SigHashType);
+/// Type for a signature/hashtype pair
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BitcoinECSig {
+    /// The underlying signature
+    pub sig: secp256k1::Signature,
+    /// The associated hash type
+    pub hash_ty: bitcoin::SigHashType,
+}
 /// Type alias for 32 byte Preimage.
 pub type Preimage32 = [u8; 32];
 
-/// Helper function to create BitcoinECSig from Rawsig
-/// Useful for downstream when implementing Satisfier.
-/// Returns underlying secp if the Signature is not of correct format
-pub fn bitcoin_ecsig_from_rawsig(rawsig: &[u8]) -> Result<BitcoinECSig, ::interpreter::Error> {
-    let (flag, sig) = rawsig.split_last().unwrap();
-    let flag = bitcoin::SigHashType::from_u32_standard(*flag as u32)
-        .map_err(|_| ::interpreter::Error::NonStandardSigHash([sig, &[*flag]].concat().to_vec()))?;
-    let sig = secp256k1::Signature::from_der(sig)?;
-    Ok((sig, flag))
+impl BitcoinECSig {
+    /// Helper function to create BitcoinECSig from Rawsig
+    /// Useful for downstream when implementing Satisfier.
+    /// Returns underlying secp if the Signature is not of correct format
+    pub fn from_rawsig(rawsig: &[u8]) -> Result<BitcoinECSig, ::interpreter::Error> {
+        let (flag, sig) = rawsig.split_last().unwrap();
+        let flag = bitcoin::SigHashType::from_u32_standard(*flag as u32).map_err(|_| {
+            ::interpreter::Error::NonStandardSigHash([sig, &[*flag]].concat().to_vec())
+        })?;
+        let sig = secp256k1::Signature::from_der(sig)?;
+        Ok(BitcoinECSig {
+            sig: sig,
+            hash_ty: flag,
+        })
+    }
+
+    /// Serialize BitcoinECSig
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut ret = self.sig.serialize_der().to_vec();
+        ret.push(self.hash_ty.as_u32() as u8);
+        ret
+    }
 }
+
 /// Trait describing a lookup table for signatures, hash preimages, etc.
 /// Every method has a default implementation that simply returns `None`
 /// on every query. Users are expected to override the methods that they
@@ -403,11 +423,7 @@ impl Witness {
     /// Turn a signature into (part of) a satisfaction
     fn signature<Pk: ToPublicKey, S: Satisfier<Pk>>(sat: S, pk: &Pk) -> Self {
         match sat.lookup_ec_sig(pk) {
-            Some((sig, hashtype)) => {
-                let mut ret = sig.serialize_der().to_vec();
-                ret.push(hashtype.as_u32() as u8);
-                Witness::Stack(vec![ret])
-            }
+            Some(sig) => Witness::Stack(vec![sig.serialize()]),
             // Signatures cannot be forged
             None => Witness::Impossible,
         }
@@ -426,10 +442,8 @@ impl Witness {
     /// Turn a key/signature pair related to a pkh into (part of) a satisfaction
     fn pkh_signature<Pk: ToPublicKey, S: Satisfier<Pk>>(sat: S, pkh: &Pk::Hash) -> Self {
         match sat.lookup_pkh_ec_sig(pkh) {
-            Some((pk, (sig, hashtype))) => {
-                let mut ret = sig.serialize_der().to_vec();
-                ret.push(hashtype.as_u32() as u8);
-                Witness::Stack(vec![ret.to_vec(), pk.to_public_key().to_bytes()])
+            Some((pk, btc_sig)) => {
+                Witness::Stack(vec![btc_sig.serialize(), pk.to_public_key().to_bytes()])
             }
             None => Witness::Impossible,
         }

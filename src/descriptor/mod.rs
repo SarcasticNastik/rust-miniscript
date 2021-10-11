@@ -926,7 +926,10 @@ mod tests {
         impl Satisfier<bitcoin::PublicKey> for SimpleSat {
             fn lookup_ec_sig(&self, pk: &bitcoin::PublicKey) -> Option<BitcoinECSig> {
                 if *pk == self.pk {
-                    Some((self.sig, bitcoin::SigHashType::All))
+                    Some(BitcoinECSig {
+                        sig: self.sig,
+                        hash_ty: bitcoin::SigHashType::All,
+                    })
                 } else {
                     None
                 }
@@ -1135,8 +1138,20 @@ mod tests {
         let satisfier = {
             let mut satisfier = HashMap::with_capacity(2);
 
-            satisfier.insert(a, (sig_a.clone(), ::bitcoin::SigHashType::All));
-            satisfier.insert(b, (sig_b.clone(), ::bitcoin::SigHashType::All));
+            satisfier.insert(
+                a,
+                BitcoinECSig {
+                    sig: sig_a.clone(),
+                    hash_ty: bitcoin::SigHashType::All,
+                },
+            );
+            satisfier.insert(
+                b,
+                BitcoinECSig {
+                    sig: sig_b.clone(),
+                    hash_ty: bitcoin::SigHashType::All,
+                },
+            );
 
             satisfier
         };

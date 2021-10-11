@@ -29,7 +29,7 @@ use bitcoin::Script;
 
 use interpreter;
 use miniscript::limits::SEQUENCE_LOCKTIME_DISABLE_FLAG;
-use miniscript::satisfy::{bitcoin_ecsig_from_rawsig, After, Older};
+use miniscript::satisfy::{After, Older};
 use Satisfier;
 use {BitcoinECSig, Preimage32};
 use {MiniscriptKey, ToPublicKey};
@@ -230,7 +230,7 @@ impl<'psbt, Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for PsbtInputSatisfie
         {
             // We have already previously checked that all signatures have the
             // correct sighash flag.
-            bitcoin_ecsig_from_rawsig(rawsig).ok()
+            BitcoinECSig::from_rawsig(rawsig).ok()
         } else {
             None
         }
@@ -244,7 +244,7 @@ impl<'psbt, Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for PsbtInputSatisfie
             .next()
         {
             // If the mapping is incorrect, return None
-            bitcoin_ecsig_from_rawsig(sig)
+            BitcoinECSig::from_rawsig(sig)
                 .ok()
                 .map(|bitcoinsig| (*pk, bitcoinsig))
         } else {

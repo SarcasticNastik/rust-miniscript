@@ -216,10 +216,10 @@ impl<'txin> Interpreter<'txin> {
             )?,
         ];
 
-        Ok(move |pk: &bitcoin::PublicKey, (sig, sighash_type)| {
+        Ok(move |pk: &bitcoin::PublicKey, btc_sig: BitcoinECSig| {
             // This is an awkward way to do this lookup, but it lets us do exhaustiveness
             // checking in case future rust-bitcoin versions add new sighash types
-            let sighash = match sighash_type {
+            let sighash = match btc_sig.hash_ty {
                 bitcoin::SigHashType::All => sighashes[0],
                 bitcoin::SigHashType::None => sighashes[1],
                 bitcoin::SigHashType::Single => sighashes[2],
@@ -227,7 +227,7 @@ impl<'txin> Interpreter<'txin> {
                 bitcoin::SigHashType::NonePlusAnyoneCanPay => sighashes[4],
                 bitcoin::SigHashType::SinglePlusAnyoneCanPay => sighashes[5],
             };
-            secp.verify(&sighash, &sig, &pk.key).is_ok()
+            secp.verify(&sighash, &btc_sig.sig, &pk.key).is_ok()
         })
     }
 }
@@ -757,10 +757,11 @@ where
     F: FnOnce(&bitcoin::PublicKey, BitcoinECSig) -> bool,
 {
     if let Some((sighash_byte, sig)) = sigser.split_last() {
-        let sighashtype = bitcoin::SigHashType::from_u32_standard(*sighash_byte as u32)
+        let hash_ty = bitcoin::SigHashType::from_u32_standard(*sighash_byte as u32)
             .map_err(|_| Error::NonStandardSigHash([sig, &[*sighash_byte]].concat().to_vec()))?;
         let sig = secp256k1::Signature::from_der(sig)?;
-        if verify_sig(pk, (sig, sighashtype)) {
+        let btc_sig = BitcoinECSig { sig, hash_ty };
+        if verify_sig(pk, btc_sig) {
             Ok(sig)
         } else {
             Err(Error::InvalidSignature(*pk))
@@ -823,8 +824,9 @@ mod tests {
     #[test]
     fn sat_constraints() {
         let (pks, der_sigs, secp_sigs, sighash, secp) = setup_keys_sigs(10);
-        let vfyfn_ =
-            |pk: &bitcoin::PublicKey, (sig, _)| secp.verify(&sighash, &sig, &pk.key).is_ok();
+        let vfyfn_ = |pk: &bitcoin::PublicKey, btc_sig: BitcoinECSig| {
+            secp.verify(&sighash, &btc_sig.sig, &pk.key).is_ok()
+        };
 
         fn from_stack<'txin, 'elem, F>(
             verify_fn: F,

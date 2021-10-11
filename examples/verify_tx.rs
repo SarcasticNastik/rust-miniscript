@@ -139,7 +139,7 @@ fn main() {
         .expect("Can only fail in sighash single when corresponding output is not present");
     // Restrict to sighash_all just to demonstrate how to add additional filters
     // `&_` needed here because of https://github.com/rust-lang/rust/issues/79187
-    let vfyfn = move |pk: &_, bitcoinsig: miniscript::BitcoinSig| {
+    let vfyfn = move |pk: &_, bitcoinsig: miniscript::BitcoinECSig| {
         bitcoinsig.1 == bitcoin::SigHashType::All && vfyfn(pk, bitcoinsig)
     };
 

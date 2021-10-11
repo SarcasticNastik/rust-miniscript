@@ -422,7 +422,7 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Wpkh<Pk> {
         Pk: ToPublicKey,
         S: Satisfier<Pk>,
     {
-        if let Some(sig) = satisfier.lookup_sig(&self.pk) {
+        if let Some(sig) = satisfier.lookup_ec_sig(&self.pk) {
             let mut sig_vec = sig.0.serialize_der().to_vec();
             sig_vec.push(sig.1.as_u32() as u8);
             let script_sig = Script::new();

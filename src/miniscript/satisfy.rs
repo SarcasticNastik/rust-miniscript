@@ -35,14 +35,14 @@ use ScriptContext;
 use Terminal;
 
 /// Type alias for a signature/hashtype pair
-pub type BitcoinSig = (secp256k1::Signature, bitcoin::SigHashType);
+pub type BitcoinECSig = (secp256k1::Signature, bitcoin::SigHashType);
 /// Type alias for 32 byte Preimage.
 pub type Preimage32 = [u8; 32];
 
-/// Helper function to create BitcoinSig from Rawsig
+/// Helper function to create BitcoinECSig from Rawsig
 /// Useful for downstream when implementing Satisfier.
 /// Returns underlying secp if the Signature is not of correct format
-pub fn bitcoinsig_from_rawsig(rawsig: &[u8]) -> Result<BitcoinSig, ::interpreter::Error> {
+pub fn bitcoin_ecsig_from_rawsig(rawsig: &[u8]) -> Result<BitcoinECSig, ::interpreter::Error> {
     let (flag, sig) = rawsig.split_last().unwrap();
     let flag = bitcoin::SigHashType::from_u32_standard(*flag as u32)
         .map_err(|_| ::interpreter::Error::NonStandardSigHash([sig, &[*flag]].concat().to_vec()))?;
@@ -54,8 +54,8 @@ pub fn bitcoinsig_from_rawsig(rawsig: &[u8]) -> Result<BitcoinSig, ::interpreter
 /// on every query. Users are expected to override the methods that they
 /// have data for.
 pub trait Satisfier<Pk: MiniscriptKey + ToPublicKey> {
-    /// Given a public key, look up a signature with that key
-    fn lookup_sig(&self, _: &Pk) -> Option<BitcoinSig> {
+    /// Given a public key, look up an EC signature with that key
+    fn lookup_ec_sig(&self, _: &Pk) -> Option<BitcoinECSig> {
         None
     }
 
@@ -64,11 +64,11 @@ pub trait Satisfier<Pk: MiniscriptKey + ToPublicKey> {
         None
     }
 
-    /// Given a keyhash, look up the signature and the associated key
+    /// Given a keyhash, look up the EC signature and the associated key
     /// Even if signatures for public key Hashes are not available, the users
     /// can use this map to provide pkh -> pk mapping which can be useful
     /// for dissatisfying pkh.
-    fn lookup_pkh_sig(&self, _: &Pk::Hash) -> Option<(bitcoin::PublicKey, BitcoinSig)> {
+    fn lookup_pkh_ec_sig(&self, _: &Pk::Hash) -> Option<(bitcoin::PublicKey, BitcoinECSig)> {
         None
     }
 
@@ -146,17 +146,17 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for After {
     }
 }
 
-impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for HashMap<Pk, BitcoinSig> {
-    fn lookup_sig(&self, key: &Pk) -> Option<BitcoinSig> {
+impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for HashMap<Pk, BitcoinECSig> {
+    fn lookup_ec_sig(&self, key: &Pk) -> Option<BitcoinECSig> {
         self.get(key).map(|x| *x)
     }
 }
 
-impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for HashMap<Pk::Hash, (Pk, BitcoinSig)>
+impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for HashMap<Pk::Hash, (Pk, BitcoinECSig)>
 where
     Pk: MiniscriptKey + ToPublicKey,
 {
-    fn lookup_sig(&self, key: &Pk) -> Option<BitcoinSig> {
+    fn lookup_ec_sig(&self, key: &Pk) -> Option<BitcoinECSig> {
         self.get(&key.to_pubkeyhash()).map(|x| x.1)
     }
 
@@ -164,23 +164,23 @@ where
         self.get(pk_hash).map(|x| x.0.clone())
     }
 
-    fn lookup_pkh_sig(&self, pk_hash: &Pk::Hash) -> Option<(bitcoin::PublicKey, BitcoinSig)> {
+    fn lookup_pkh_ec_sig(&self, pk_hash: &Pk::Hash) -> Option<(bitcoin::PublicKey, BitcoinECSig)> {
         self.get(pk_hash)
             .map(|&(ref pk, sig)| (pk.to_public_key(), sig))
     }
 }
 
 impl<'a, Pk: MiniscriptKey + ToPublicKey, S: Satisfier<Pk>> Satisfier<Pk> for &'a S {
-    fn lookup_sig(&self, p: &Pk) -> Option<BitcoinSig> {
-        (**self).lookup_sig(p)
+    fn lookup_ec_sig(&self, p: &Pk) -> Option<BitcoinECSig> {
+        (**self).lookup_ec_sig(p)
     }
 
     fn lookup_pkh_pk(&self, pkh: &Pk::Hash) -> Option<Pk> {
         (**self).lookup_pkh_pk(pkh)
     }
 
-    fn lookup_pkh_sig(&self, pkh: &Pk::Hash) -> Option<(bitcoin::PublicKey, BitcoinSig)> {
-        (**self).lookup_pkh_sig(pkh)
+    fn lookup_pkh_ec_sig(&self, pkh: &Pk::Hash) -> Option<(bitcoin::PublicKey, BitcoinECSig)> {
+        (**self).lookup_pkh_ec_sig(pkh)
     }
 
     fn lookup_sha256(&self, h: sha256::Hash) -> Option<Preimage32> {
@@ -209,16 +209,16 @@ impl<'a, Pk: MiniscriptKey + ToPublicKey, S: Satisfier<Pk>> Satisfier<Pk> for &'
 }
 
 impl<'a, Pk: MiniscriptKey + ToPublicKey, S: Satisfier<Pk>> Satisfier<Pk> for &'a mut S {
-    fn lookup_sig(&self, p: &Pk) -> Option<BitcoinSig> {
-        (**self).lookup_sig(p)
+    fn lookup_ec_sig(&self, p: &Pk) -> Option<BitcoinECSig> {
+        (**self).lookup_ec_sig(p)
     }
 
     fn lookup_pkh_pk(&self, pkh: &Pk::Hash) -> Option<Pk> {
         (**self).lookup_pkh_pk(pkh)
     }
 
-    fn lookup_pkh_sig(&self, pkh: &Pk::Hash) -> Option<(bitcoin::PublicKey, BitcoinSig)> {
-        (**self).lookup_pkh_sig(pkh)
+    fn lookup_pkh_ec_sig(&self, pkh: &Pk::Hash) -> Option<(bitcoin::PublicKey, BitcoinECSig)> {
+        (**self).lookup_pkh_ec_sig(pkh)
     }
 
     fn lookup_sha256(&self, h: sha256::Hash) -> Option<Preimage32> {
@@ -254,23 +254,23 @@ macro_rules! impl_tuple_satisfier {
             Pk: MiniscriptKey + ToPublicKey,
             $($ty: Satisfier< Pk>,)*
         {
-            fn lookup_sig(&self, key: &Pk) -> Option<BitcoinSig> {
+            fn lookup_ec_sig(&self, key: &Pk) -> Option<BitcoinECSig> {
                 let &($(ref $ty,)*) = self;
                 $(
-                    if let Some(result) = $ty.lookup_sig(key) {
+                    if let Some(result) = $ty.lookup_ec_sig(key) {
                         return Some(result);
                     }
                 )*
                 None
             }
 
-            fn lookup_pkh_sig(
+            fn lookup_pkh_ec_sig(
                 &self,
                 key_hash: &Pk::Hash,
-            ) -> Option<(bitcoin::PublicKey, BitcoinSig)> {
+            ) -> Option<(bitcoin::PublicKey, BitcoinECSig)> {
                 let &($(ref $ty,)*) = self;
                 $(
-                    if let Some(result) = $ty.lookup_pkh_sig(key_hash) {
+                    if let Some(result) = $ty.lookup_pkh_ec_sig(key_hash) {
                         return Some(result);
                     }
                 )*
@@ -402,7 +402,7 @@ impl Ord for Witness {
 impl Witness {
     /// Turn a signature into (part of) a satisfaction
     fn signature<Pk: ToPublicKey, S: Satisfier<Pk>>(sat: S, pk: &Pk) -> Self {
-        match sat.lookup_sig(pk) {
+        match sat.lookup_ec_sig(pk) {
             Some((sig, hashtype)) => {
                 let mut ret = sig.serialize_der().to_vec();
                 ret.push(hashtype.as_u32() as u8);
@@ -425,7 +425,7 @@ impl Witness {
 
     /// Turn a key/signature pair related to a pkh into (part of) a satisfaction
     fn pkh_signature<Pk: ToPublicKey, S: Satisfier<Pk>>(sat: S, pkh: &Pk::Hash) -> Self {
-        match sat.lookup_pkh_sig(pkh) {
+        match sat.lookup_pkh_ec_sig(pkh) {
             Some((pk, (sig, hashtype))) => {
                 let mut ret = sig.serialize_der().to_vec();
                 ret.push(hashtype.as_u32() as u8);

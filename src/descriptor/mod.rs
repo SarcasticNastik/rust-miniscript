@@ -635,7 +635,7 @@ mod tests {
         DescriptorPublicKey, DescriptorSecretKey, DescriptorSinglePub, DescriptorXKey,
     };
     use hex_script;
-    use miniscript::satisfy::BitcoinSig;
+    use miniscript::satisfy::BitcoinECSig;
     use std::cmp;
     use std::collections::HashMap;
     use std::str::FromStr;
@@ -924,7 +924,7 @@ mod tests {
         }
 
         impl Satisfier<bitcoin::PublicKey> for SimpleSat {
-            fn lookup_sig(&self, pk: &bitcoin::PublicKey) -> Option<BitcoinSig> {
+            fn lookup_ec_sig(&self, pk: &bitcoin::PublicKey) -> Option<BitcoinECSig> {
                 if *pk == self.pk {
                     Some((self.sig, bitcoin::SigHashType::All))
                 } else {

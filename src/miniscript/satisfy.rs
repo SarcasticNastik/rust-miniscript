@@ -34,8 +34,10 @@ use Miniscript;
 use ScriptContext;
 use Terminal;
 
-type LegacySigHashType = bitcoin::SigHashType;
-type SchnorrSigHashType = bitcoin::util::sighash::SigHashType;
+/// type alias for legacy sighash type
+pub type LegacySigHashType = bitcoin::SigHashType;
+/// type alias for schnorr signature hash type (includes sighash default)
+pub type SchnorrSigHashType = bitcoin::util::sighash::SigHashType;
 /// Type for a EC signature/hashtype pair
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BitcoinECSig {

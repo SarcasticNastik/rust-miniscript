@@ -34,14 +34,17 @@ use Miniscript;
 use ScriptContext;
 use Terminal;
 
-/// Type for a signature/hashtype pair
+type LegacySigHashType = bitcoin::SigHashType;
+type SchnorrSigHashType = bitcoin::util::sighash::SigHashType;
+/// Type for a EC signature/hashtype pair
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BitcoinECSig {
     /// The underlying signature
     pub sig: secp256k1::Signature,
     /// The associated hash type
-    pub hash_ty: bitcoin::SigHashType,
+    pub hash_ty: LegacySigHashType,
 }
+
 /// Type alias for 32 byte Preimage.
 pub type Preimage32 = [u8; 32];
 
@@ -50,7 +53,9 @@ impl BitcoinECSig {
     /// Useful for downstream when implementing Satisfier.
     /// Returns underlying secp if the Signature is not of correct format
     pub fn from_rawsig(rawsig: &[u8]) -> Result<BitcoinECSig, ::interpreter::Error> {
-        let (flag, sig) = rawsig.split_last().unwrap();
+        let (flag, sig) = rawsig
+            .split_last()
+            .ok_or(::interpreter::Error::NonStandardSigHash(Vec::from(rawsig)))?;
         let flag = bitcoin::SigHashType::from_u32_standard(*flag as u32).map_err(|_| {
             ::interpreter::Error::NonStandardSigHash([sig, &[*flag]].concat().to_vec())
         })?;
@@ -69,6 +74,53 @@ impl BitcoinECSig {
     }
 }
 
+impl BitcoinSchnorrSig {
+    /// Helper function to create BitcoinSchnorrSig from raw sig bytes
+    /// Useful for downstream when implementing Satisfier.
+    /// Returns underlying secp if the Signature is not of correct format
+    pub fn from_rawsig(rawsig: &[u8]) -> Result<BitcoinSchnorrSig, ::interpreter::Error> {
+        let (flag, sig) = if rawsig.len() == 65 {
+            let (flag, sig) = rawsig.split_last().unwrap();
+            // Workaround to parse sighash type.
+            let legacy_flag = LegacySigHashType::from_u32_standard(*flag as u32).map_err(|_| {
+                ::interpreter::Error::InvalidSchnorrSigHashType([sig, &[*flag]].concat().to_vec())
+            })?;
+            let schnorr_sighash_ty = SchnorrSigHashType::from(legacy_flag);
+            let schnorr_sig = secp256k1::schnorrsig::Signature::from_slice(sig)?;
+            (schnorr_sighash_ty, schnorr_sig)
+        } else {
+            // Other lengths would be correctly handled by secp
+            let schnorr_sig = secp256k1::schnorrsig::Signature::from_slice(rawsig)?;
+            (bitcoin::util::sighash::SigHashType::Default, schnorr_sig)
+        };
+        Ok(BitcoinSchnorrSig {
+            sig: sig,
+            hash_ty: flag,
+        })
+    }
+
+    /// Serialize to vec of bytes
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut ret = self.sig.as_ref().to_vec();
+        if let bitcoin::util::sighash::SigHashType::Default = self.hash_ty {
+            // If the type is default, the sig is explicit 64 bytes
+            // nothing to push for sighash type
+        } else {
+            ret.push(self.hash_ty as u8);
+        }
+        ret
+    }
+}
+
+/// Type for a schnorr signature/hashtype pair
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BitcoinSchnorrSig {
+    /// The underlying schnorr signature
+    pub sig: secp256k1::schnorrsig::Signature,
+    /// The associated hash type
+    pub hash_ty: SchnorrSigHashType,
+}
+
 /// Trait describing a lookup table for signatures, hash preimages, etc.
 /// Every method has a default implementation that simply returns `None`
 /// on every query. Users are expected to override the methods that they
@@ -76,6 +128,11 @@ impl BitcoinECSig {
 pub trait Satisfier<Pk: MiniscriptKey + ToPublicKey> {
     /// Given a public key, look up an EC signature with that key
     fn lookup_ec_sig(&self, _: &Pk) -> Option<BitcoinECSig> {
+        None
+    }
+
+    /// Given a public key, look up an schnorr signature with that key
+    fn lookup_schnorr_sig(&self, _: &Pk) -> Option<BitcoinSchnorrSig> {
         None
     }
 
@@ -89,6 +146,17 @@ pub trait Satisfier<Pk: MiniscriptKey + ToPublicKey> {
     /// can use this map to provide pkh -> pk mapping which can be useful
     /// for dissatisfying pkh.
     fn lookup_pkh_ec_sig(&self, _: &Pk::Hash) -> Option<(bitcoin::PublicKey, BitcoinECSig)> {
+        None
+    }
+
+    /// Given a keyhash, look up the schnorr signature and the associated key
+    /// Even if signatures for public key Hashes are not available, the users
+    /// can use this map to provide pkh -> pk mapping which can be useful
+    /// for dissatisfying pkh.
+    fn lookup_pkh_schnorr_sig(
+        &self,
+        _: &Pk::Hash,
+    ) -> Option<(bitcoin::PublicKey, BitcoinSchnorrSig)> {
         None
     }
 
@@ -172,6 +240,12 @@ impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for HashMap<Pk, BitcoinECSig
     }
 }
 
+impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for HashMap<Pk, BitcoinSchnorrSig> {
+    fn lookup_schnorr_sig(&self, key: &Pk) -> Option<BitcoinSchnorrSig> {
+        self.get(key).map(|x| *x)
+    }
+}
+
 impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for HashMap<Pk::Hash, (Pk, BitcoinECSig)>
 where
     Pk: MiniscriptKey + ToPublicKey,
@@ -190,9 +264,34 @@ where
     }
 }
 
+impl<Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for HashMap<Pk::Hash, (Pk, BitcoinSchnorrSig)>
+where
+    Pk: MiniscriptKey + ToPublicKey,
+{
+    fn lookup_schnorr_sig(&self, key: &Pk) -> Option<BitcoinSchnorrSig> {
+        self.get(&key.to_pubkeyhash()).map(|x| x.1)
+    }
+
+    fn lookup_pkh_pk(&self, pk_hash: &Pk::Hash) -> Option<Pk> {
+        self.get(pk_hash).map(|x| x.0.clone())
+    }
+
+    fn lookup_pkh_schnorr_sig(
+        &self,
+        pk_hash: &Pk::Hash,
+    ) -> Option<(bitcoin::PublicKey, BitcoinSchnorrSig)> {
+        self.get(pk_hash)
+            .map(|&(ref pk, sig)| (pk.to_public_key(), sig))
+    }
+}
+
 impl<'a, Pk: MiniscriptKey + ToPublicKey, S: Satisfier<Pk>> Satisfier<Pk> for &'a S {
     fn lookup_ec_sig(&self, p: &Pk) -> Option<BitcoinECSig> {
         (**self).lookup_ec_sig(p)
+    }
+
+    fn lookup_schnorr_sig(&self, p: &Pk) -> Option<BitcoinSchnorrSig> {
+        (**self).lookup_schnorr_sig(p)
     }
 
     fn lookup_pkh_pk(&self, pkh: &Pk::Hash) -> Option<Pk> {
@@ -201,6 +300,13 @@ impl<'a, Pk: MiniscriptKey + ToPublicKey, S: Satisfier<Pk>> Satisfier<Pk> for &'
 
     fn lookup_pkh_ec_sig(&self, pkh: &Pk::Hash) -> Option<(bitcoin::PublicKey, BitcoinECSig)> {
         (**self).lookup_pkh_ec_sig(pkh)
+    }
+
+    fn lookup_pkh_schnorr_sig(
+        &self,
+        pkh: &Pk::Hash,
+    ) -> Option<(bitcoin::PublicKey, BitcoinSchnorrSig)> {
+        (**self).lookup_pkh_schnorr_sig(pkh)
     }
 
     fn lookup_sha256(&self, h: sha256::Hash) -> Option<Preimage32> {
@@ -233,12 +339,23 @@ impl<'a, Pk: MiniscriptKey + ToPublicKey, S: Satisfier<Pk>> Satisfier<Pk> for &'
         (**self).lookup_ec_sig(p)
     }
 
+    fn lookup_schnorr_sig(&self, p: &Pk) -> Option<BitcoinSchnorrSig> {
+        (**self).lookup_schnorr_sig(p)
+    }
+
     fn lookup_pkh_pk(&self, pkh: &Pk::Hash) -> Option<Pk> {
         (**self).lookup_pkh_pk(pkh)
     }
 
     fn lookup_pkh_ec_sig(&self, pkh: &Pk::Hash) -> Option<(bitcoin::PublicKey, BitcoinECSig)> {
         (**self).lookup_pkh_ec_sig(pkh)
+    }
+
+    fn lookup_pkh_schnorr_sig(
+        &self,
+        pkh: &Pk::Hash,
+    ) -> Option<(bitcoin::PublicKey, BitcoinSchnorrSig)> {
+        (**self).lookup_pkh_schnorr_sig(pkh)
     }
 
     fn lookup_sha256(&self, h: sha256::Hash) -> Option<Preimage32> {
@@ -284,6 +401,16 @@ macro_rules! impl_tuple_satisfier {
                 None
             }
 
+            fn lookup_schnorr_sig(&self, key: &Pk) -> Option<BitcoinSchnorrSig> {
+                let &($(ref $ty,)*) = self;
+                $(
+                    if let Some(result) = $ty.lookup_schnorr_sig(key) {
+                        return Some(result);
+                    }
+                )*
+                None
+            }
+
             fn lookup_pkh_ec_sig(
                 &self,
                 key_hash: &Pk::Hash,
@@ -291,6 +418,19 @@ macro_rules! impl_tuple_satisfier {
                 let &($(ref $ty,)*) = self;
                 $(
                     if let Some(result) = $ty.lookup_pkh_ec_sig(key_hash) {
+                        return Some(result);
+                    }
+                )*
+                None
+            }
+
+            fn lookup_pkh_schnorr_sig(
+                &self,
+                key_hash: &Pk::Hash,
+            ) -> Option<(bitcoin::PublicKey, BitcoinSchnorrSig)> {
+                let &($(ref $ty,)*) = self;
+                $(
+                    if let Some(result) = $ty.lookup_pkh_schnorr_sig(key_hash) {
                         return Some(result);
                     }
                 )*

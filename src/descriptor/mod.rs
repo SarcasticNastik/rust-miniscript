@@ -88,12 +88,17 @@ pub trait DescriptorTrait<Pk: MiniscriptKey> {
 
     /// Computes the Bitcoin address of the descriptor, if one exists
     /// Some descriptors like pk() don't have any address.
+    /// Errors:
+    /// - On raw/bare descriptors that don't have any address
+    /// - In Tr descriptors where the precomputed spend data is not available
     fn address(&self, network: bitcoin::Network) -> Result<bitcoin::Address, Error>
     where
         Pk: ToPublicKey;
 
     /// Computes the scriptpubkey of the descriptor
-    fn script_pubkey(&self) -> Script
+    /// Errors:
+    /// - In Tr descriptor when the pre-computed data is unavailable
+    fn script_pubkey(&self) -> Result<Script, Error>
     where
         Pk: ToPublicKey;
 
@@ -113,11 +118,12 @@ pub trait DescriptorTrait<Pk: MiniscriptKey> {
     /// script before any hashing is done. For `Bare`, `Pkh` and `Wpkh` this
     /// is the scriptPubkey; for `ShWpkh` and `Sh` this is the redeemScript;
     /// for the others it is the witness script.
-    fn explicit_script(&self) -> Script
+    /// For `Tr` descriptors, this will error as there is no underlying script
+    fn explicit_script(&self) -> Result<Script, Error>
     where
         Pk: ToPublicKey;
 
-    /// Returns satisfying witness and scriptSig to spend an
+    /// Returns satisfying non-malleable witness and scriptSig with minimum weight to spend an
     /// output controlled by the given descriptor if it possible to
     /// construct one using the satisfier S.
     fn get_satisfaction<S>(&self, satisfier: S) -> Result<(Vec<Vec<u8>>, Script), Error>
@@ -141,7 +147,7 @@ pub trait DescriptorTrait<Pk: MiniscriptKey> {
     }
 
     /// Computes an upper bound on the weight of a satisfying witness to the
-    /// transaction. Assumes all signatures are 73 bytes, including push opcode
+    /// transaction. Assumes all ec-signatures are 73 bytes, including push opcode
     /// and sighash suffix. Includes the weight of the VarInts encoding the
     /// scriptSig and witness stack length.
     /// Returns Error when the descriptor is impossible to safisfy (ex: sh(OP_FALSE))
@@ -151,7 +157,9 @@ pub trait DescriptorTrait<Pk: MiniscriptKey> {
     ///
     /// The `scriptCode` is the Script of the previous transaction output being serialized in the
     /// sighash when evaluating a `CHECKSIG` & co. OP code.
-    fn script_code(&self) -> Script
+    /// Errors:
+    /// - When the descriptor is Tr
+    fn script_code(&self) -> Result<Script, Error>
     where
         Pk: ToPublicKey;
 }
@@ -373,7 +381,7 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Descriptor<Pk> {
     }
 
     /// Computes the scriptpubkey of the descriptor
-    fn script_pubkey(&self) -> Script
+    fn script_pubkey(&self) -> Result<Script, Error>
     where
         Pk: ToPublicKey,
     {
@@ -411,7 +419,9 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Descriptor<Pk> {
     /// script before any hashing is done. For `Bare`, `Pkh` and `Wpkh` this
     /// is the scriptPubkey; for `ShWpkh` and `Sh` this is the redeemScript;
     /// for the others it is the witness script.
-    fn explicit_script(&self) -> Script
+    /// Errors:
+    /// - When the descriptor is Tr
+    fn explicit_script(&self) -> Result<Script, Error>
     where
         Pk: ToPublicKey,
     {
@@ -459,7 +469,8 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Descriptor<Pk> {
     ///
     /// The `scriptCode` is the Script of the previous transaction output being serialized in the
     /// sighash when evaluating a `CHECKSIG` & co. OP code.
-    fn script_code(&self) -> Script
+    /// Returns Error for Tr descriptors
+    fn script_code(&self) -> Result<Script, Error>
     where
         Pk: ToPublicKey,
     {
@@ -739,7 +750,7 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(
-            bare.script_pubkey(),
+            bare.script_pubkey().unwrap(),
             hex_script(
                 "512102000000000000000000000000000000000000000000000000000000000000000251ae"
             )
@@ -753,7 +764,7 @@ mod tests {
 
         let pk = StdDescriptor::from_str(TEST_PK).unwrap();
         assert_eq!(
-            pk.script_pubkey(),
+            pk.script_pubkey().unwrap(),
             bitcoin::Script::from(vec![
                 0x21, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -768,7 +779,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            pkh.script_pubkey(),
+            pkh.script_pubkey().unwrap(),
             script::Builder::new()
                 .push_opcode(opcodes::all::OP_DUP)
                 .push_opcode(opcodes::all::OP_HASH160)
@@ -792,7 +803,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            wpkh.script_pubkey(),
+            wpkh.script_pubkey().unwrap(),
             script::Builder::new()
                 .push_opcode(opcodes::all::OP_PUSHBYTES_0)
                 .push_slice(
@@ -815,7 +826,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            shwpkh.script_pubkey(),
+            shwpkh.script_pubkey().unwrap(),
             script::Builder::new()
                 .push_opcode(opcodes::all::OP_HASH160)
                 .push_slice(
@@ -840,7 +851,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            sh.script_pubkey(),
+            sh.script_pubkey().unwrap(),
             script::Builder::new()
                 .push_opcode(opcodes::all::OP_HASH160)
                 .push_slice(
@@ -862,7 +873,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            wsh.script_pubkey(),
+            wsh.script_pubkey().unwrap(),
             script::Builder::new()
                 .push_opcode(opcodes::all::OP_PUSHBYTES_0)
                 .push_slice(
@@ -888,7 +899,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            shwsh.script_pubkey(),
+            shwsh.script_pubkey().unwrap(),
             script::Builder::new()
                 .push_opcode(opcodes::all::OP_HASH160)
                 .push_slice(
@@ -1074,7 +1085,7 @@ mod tests {
     #[test]
     fn after_is_cltv() {
         let descriptor = Descriptor::<bitcoin::PublicKey>::from_str("wsh(after(1000))").unwrap();
-        let script = descriptor.explicit_script();
+        let script = descriptor.explicit_script().unwrap();
 
         let actual_instructions: Vec<_> = script.instructions().collect();
         let check = actual_instructions.last().unwrap();
@@ -1085,7 +1096,7 @@ mod tests {
     #[test]
     fn older_is_csv() {
         let descriptor = Descriptor::<bitcoin::PublicKey>::from_str("wsh(older(1000))").unwrap();
-        let script = descriptor.explicit_script();
+        let script = descriptor.explicit_script().unwrap();
 
         let actual_instructions: Vec<_> = script.instructions().collect();
         let check = actual_instructions.last().unwrap();
@@ -1224,7 +1235,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            *descriptor.script_code().as_bytes(),
+            *descriptor.script_code().unwrap().as_bytes(),
             Vec::<u8>::from_hex("76a9141d0f172a0ecb48aee1be1f2687d2963ae33f71a188ac").unwrap()[..]
         );
 
@@ -1234,7 +1245,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            *descriptor.script_code().as_bytes(),
+            *descriptor.script_code().unwrap().as_bytes(),
             Vec::<u8>::from_hex("76a91479091972186c449eb1ded22b78e40d009bdf008988ac").unwrap()[..]
         );
 
@@ -1245,7 +1256,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             *descriptor
-                .script_code()
+                .script_code().unwrap()
                 .as_bytes(),
             Vec::<u8>::from_hex("522103789ed0bb717d88f7d321a368d905e7430207ebbd82bd342cf11ae157a7ace5fd2103dbc6764b8884a92e871274b87583e6d5c2a58819473e17e107ef3f6aa5a6162652ae").unwrap()[..]
         );
@@ -1254,7 +1265,7 @@ mod tests {
         let descriptor = Descriptor::<PublicKey>::from_str("sh(wsh(multi(2,03789ed0bb717d88f7d321a368d905e7430207ebbd82bd342cf11ae157a7ace5fd,03dbc6764b8884a92e871274b87583e6d5c2a58819473e17e107ef3f6aa5a61626)))").unwrap();
         assert_eq!(
             *descriptor
-                .script_code()
+                .script_code().unwrap()
                 .as_bytes(),
             Vec::<u8>::from_hex("522103789ed0bb717d88f7d321a368d905e7430207ebbd82bd342cf11ae157a7ace5fd2103dbc6764b8884a92e871274b87583e6d5c2a58819473e17e107ef3f6aa5a6162652ae")
                 .unwrap()[..]

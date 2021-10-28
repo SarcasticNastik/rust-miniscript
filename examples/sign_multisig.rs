@@ -96,12 +96,22 @@ fn main() {
 
     // Observe the script properties, just for fun
     assert_eq!(
-        format!("{:x}", my_descriptor.script_pubkey()),
+        format!(
+            "{:x}",
+            my_descriptor
+                .script_pubkey()
+                .expect("wsh descriptors have spk")
+        ),
         "00200ed49b334a12c37f3df8a2974ad91ff95029215a2b53f78155be737907f06163"
     );
 
     assert_eq!(
-        format!("{:x}", my_descriptor.explicit_script()),
+        format!(
+            "{:x}",
+            my_descriptor
+                .explicit_script()
+                .expect("wsh descriptors have unique inner script")
+        ),
         "52\
          21020202020202020202020202020202020202020202020202020202020202020202\
          21020102030405060708010203040506070801020304050607080000000000000000\

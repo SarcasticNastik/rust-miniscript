@@ -28,6 +28,7 @@ use std::marker::PhantomData;
 use std::{fmt, str};
 
 use bitcoin::blockdata::script;
+use bitcoin::util::taproot::{LeafVersion, TapLeafHash};
 
 pub use self::context::{BareCtx, Legacy, Segwitv0, Tap};
 
@@ -358,7 +359,12 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Miniscript<Pk, Ctx> {
     where
         Pk: ToPublicKey,
     {
-        match satisfy::Satisfaction::satisfy(&self.node, &satisfier, self.ty.mall.safe).stack {
+        // Only satisfactions for default versions (0xc0) are allowed.
+        let ver = LeafVersion::default();
+        let leaf_hash = TapLeafHash::from_script(&self.encode(), ver);
+        match satisfy::Satisfaction::satisfy(&self.node, &satisfier, self.ty.mall.safe, &leaf_hash)
+            .stack
+        {
             satisfy::Witness::Stack(stack) => {
                 Ctx::check_witness::<Pk>(&stack)?;
                 Ok(stack)
@@ -378,7 +384,16 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Miniscript<Pk, Ctx> {
     where
         Pk: ToPublicKey,
     {
-        match satisfy::Satisfaction::satisfy_mall(&self.node, &satisfier, self.ty.mall.safe).stack {
+        let ver = LeafVersion::default();
+        let leaf_hash = TapLeafHash::from_script(&self.encode(), ver);
+        match satisfy::Satisfaction::satisfy_mall(
+            &self.node,
+            &satisfier,
+            self.ty.mall.safe,
+            &leaf_hash,
+        )
+        .stack
+        {
             satisfy::Witness::Stack(stack) => {
                 Ctx::check_witness::<Pk>(&stack)?;
                 Ok(stack)
@@ -449,6 +464,7 @@ serde_string_impl_pk!(Miniscript, "a miniscript", Ctx; ScriptContext);
 #[cfg(test)]
 mod tests {
 
+    use bitcoin::util::taproot::TapLeafHash;
     use {Satisfier, ToPublicKey};
 
     use super::{Miniscript, ScriptContext};
@@ -1037,7 +1053,11 @@ mod tests {
 
         // a simple satisfier that always outputs the same signature
         impl<Pk: ToPublicKey> Satisfier<Pk> for SimpleSatisfier {
-            fn lookup_schnorr_sig(&self, _pk: &Pk) -> Option<bitcoin::SchnorrSig> {
+            fn lookup_tap_leaf_script_sig(
+                &self,
+                _pk: &Pk,
+                _h: &TapLeafHash,
+            ) -> Option<bitcoin::SchnorrSig> {
                 Some(bitcoin::SchnorrSig {
                     sig: self.0,
                     hash_ty: bitcoin::SchnorrSigHashType::Default,

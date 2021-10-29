@@ -46,6 +46,7 @@ mod segwitv0;
 mod sh;
 mod sortedmulti;
 mod tr;
+
 // Descriptor Exports
 pub use self::bare::{Bare, Pkh};
 pub use self::segwitv0::{Wpkh, Wsh, WshInner};
@@ -177,6 +178,8 @@ pub enum Descriptor<Pk: MiniscriptKey> {
     Sh(Sh<Pk>),
     /// Pay-to-Witness-ScriptHash with Segwitv0 context
     Wsh(Wsh<Pk>),
+    /// Pay-to-Taproot
+    Tr(Tr<Pk>),
 }
 
 /// Descriptor Type of the descriptor
@@ -202,6 +205,8 @@ pub enum DescriptorType {
     WshSortedMulti,
     /// Sh Wsh Sorted Multi
     ShWshSortedMulti,
+    /// Tr Descriptor
+    Tr,
 }
 
 impl<Pk: MiniscriptKey> Descriptor<Pk> {
@@ -288,6 +293,12 @@ impl<Pk: MiniscriptKey> Descriptor<Pk> {
         Ok(Descriptor::Wsh(Wsh::new_sortedmulti(k, pks)?))
     }
 
+    /// Create new tr descriptor
+    /// Errors when miniscript exceeds resource limits under Segwitv0 context
+    pub fn new_tr(key: Pk, script: Option<tr::TapTree<Pk>>) -> Result<Self, Error> {
+        Ok(Descriptor::Tr(Tr::new(key, script)?))
+    }
+
     /// Get the [DescriptorType] of [Descriptor]
     pub fn desc_type(&self) -> DescriptorType {
         match *self {
@@ -307,6 +318,7 @@ impl<Pk: MiniscriptKey> Descriptor<Pk> {
                 WshInner::SortedMulti(ref _smv) => DescriptorType::WshSortedMulti,
                 WshInner::Ms(ref _ms) => DescriptorType::Wsh,
             },
+            Descriptor::Tr(ref _tr) => DescriptorType::Tr,
         }
     }
 }
@@ -343,6 +355,9 @@ impl<P: MiniscriptKey, Q: MiniscriptKey> TranslatePk<P, Q> for Descriptor<P> {
             Descriptor::Wsh(ref wsh) => {
                 Descriptor::Wsh(wsh.translate_pk(&mut translatefpk, &mut translatefpkh)?)
             }
+            Descriptor::Tr(ref tr) => {
+                Descriptor::Tr(tr.translate_pk(&mut translatefpk, &mut translatefpkh)?)
+            }
         };
         Ok(desc)
     }
@@ -364,6 +379,7 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Descriptor<Pk> {
             Descriptor::Wpkh(ref wpkh) => wpkh.sanity_check(),
             Descriptor::Wsh(ref wsh) => wsh.sanity_check(),
             Descriptor::Sh(ref sh) => sh.sanity_check(),
+            Descriptor::Tr(ref tr) => tr.sanity_check(),
         }
     }
     /// Computes the Bitcoin address of the descriptor, if one exists
@@ -377,6 +393,7 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Descriptor<Pk> {
             Descriptor::Wpkh(ref wpkh) => wpkh.address(network),
             Descriptor::Wsh(ref wsh) => wsh.address(network),
             Descriptor::Sh(ref sh) => sh.address(network),
+            Descriptor::Tr(ref tr) => tr.address(network),
         }
     }
 
@@ -391,6 +408,7 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Descriptor<Pk> {
             Descriptor::Wpkh(ref wpkh) => wpkh.script_pubkey(),
             Descriptor::Wsh(ref wsh) => wsh.script_pubkey(),
             Descriptor::Sh(ref sh) => sh.script_pubkey(),
+            Descriptor::Tr(ref tr) => tr.script_pubkey(),
         }
     }
 
@@ -412,6 +430,7 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Descriptor<Pk> {
             Descriptor::Wpkh(ref wpkh) => wpkh.unsigned_script_sig(),
             Descriptor::Wsh(ref wsh) => wsh.unsigned_script_sig(),
             Descriptor::Sh(ref sh) => sh.unsigned_script_sig(),
+            Descriptor::Tr(ref tr) => tr.unsigned_script_sig(),
         }
     }
 
@@ -431,6 +450,7 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Descriptor<Pk> {
             Descriptor::Wpkh(ref wpkh) => wpkh.explicit_script(),
             Descriptor::Wsh(ref wsh) => wsh.explicit_script(),
             Descriptor::Sh(ref sh) => sh.explicit_script(),
+            Descriptor::Tr(ref tr) => tr.explicit_script(),
         }
     }
 
@@ -448,6 +468,7 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Descriptor<Pk> {
             Descriptor::Wpkh(ref wpkh) => wpkh.get_satisfaction(satisfier),
             Descriptor::Wsh(ref wsh) => wsh.get_satisfaction(satisfier),
             Descriptor::Sh(ref sh) => sh.get_satisfaction(satisfier),
+            Descriptor::Tr(ref tr) => tr.get_satisfaction(satisfier),
         }
     }
 
@@ -462,6 +483,7 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Descriptor<Pk> {
             Descriptor::Wpkh(ref wpkh) => wpkh.max_satisfaction_weight(),
             Descriptor::Wsh(ref wsh) => wsh.max_satisfaction_weight(),
             Descriptor::Sh(ref sh) => sh.max_satisfaction_weight(),
+            Descriptor::Tr(ref tr) => tr.max_satisfaction_weight(),
         }
     }
 
@@ -480,6 +502,7 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Descriptor<Pk> {
             Descriptor::Wpkh(ref wpkh) => wpkh.script_code(),
             Descriptor::Wsh(ref wsh) => wsh.script_code(),
             Descriptor::Sh(ref sh) => sh.script_code(),
+            Descriptor::Tr(ref tr) => tr.script_code(),
         }
     }
 }
@@ -496,6 +519,7 @@ impl<Pk: MiniscriptKey> ForEachKey<Pk> for Descriptor<Pk> {
             Descriptor::Wpkh(ref wpkh) => wpkh.for_each_key(pred),
             Descriptor::Wsh(ref wsh) => wsh.for_each_key(pred),
             Descriptor::Sh(ref sh) => sh.for_each_key(pred),
+            Descriptor::Tr(ref tr) => tr.for_each_key(pred),
         }
     }
 }
@@ -615,6 +639,7 @@ impl<Pk: MiniscriptKey> fmt::Debug for Descriptor<Pk> {
             Descriptor::Wpkh(ref wpkh) => write!(f, "{:?}", wpkh),
             Descriptor::Sh(ref sub) => write!(f, "{:?}", sub),
             Descriptor::Wsh(ref sub) => write!(f, "{:?}", sub),
+            Descriptor::Tr(ref tr) => write!(f, "{:?}", tr),
         }
     }
 }
@@ -627,6 +652,7 @@ impl<Pk: MiniscriptKey> fmt::Display for Descriptor<Pk> {
             Descriptor::Wpkh(ref wpkh) => write!(f, "{}", wpkh),
             Descriptor::Sh(ref sub) => write!(f, "{}", sub),
             Descriptor::Wsh(ref sub) => write!(f, "{}", sub),
+            Descriptor::Tr(ref tr) => write!(f, "{}", tr),
         }
     }
 }

@@ -131,6 +131,9 @@ pub use miniscript::satisfy::{
 };
 pub use miniscript::Miniscript;
 
+// Use schnorr pubkey as Xonlykey
+pub(crate) use bitcoin::schnorr::PublicKey as XOnlyPubKey;
+
 ///Public key trait which can be converted to Hash type
 pub trait MiniscriptKey: Clone + Eq + Ord + fmt::Debug + fmt::Display + hash::Hash {
     /// Check if the publicKey is uncompressed. The default

@@ -18,7 +18,7 @@
 //! scriptpubkeys.
 //!
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::{cmp, i64, mem};
 
@@ -147,11 +147,9 @@ pub trait Satisfier<Pk: MiniscriptKey + ToPublicKey> {
     }
 
     /// Obtain a reference to the control block for a ver and script
-    fn lookup_tap_control_block(
+    fn lookup_tap_control_block_map(
         &self,
-        _ver: LeafVersion,
-        _script: &bitcoin::Script,
-    ) -> Option<&ControlBlock> {
+    ) -> Option<&BTreeMap<ControlBlock, (bitcoin::Script, LeafVersion)>> {
         None
     }
 
@@ -335,12 +333,10 @@ impl<'a, Pk: MiniscriptKey + ToPublicKey, S: Satisfier<Pk>> Satisfier<Pk> for &'
         (**self).lookup_pkh_tap_leaf_script_sig(pkh)
     }
 
-    fn lookup_tap_control_block(
+    fn lookup_tap_control_block_map(
         &self,
-        ver: LeafVersion,
-        script: &bitcoin::Script,
-    ) -> Option<&ControlBlock> {
-        (**self).lookup_tap_control_block(ver, script)
+    ) -> Option<&BTreeMap<ControlBlock, (bitcoin::Script, LeafVersion)>> {
+        (**self).lookup_tap_control_block_map()
     }
 
     fn lookup_sha256(&self, h: sha256::Hash) -> Option<Preimage32> {
@@ -396,12 +392,10 @@ impl<'a, Pk: MiniscriptKey + ToPublicKey, S: Satisfier<Pk>> Satisfier<Pk> for &'
         (**self).lookup_pkh_tap_leaf_script_sig(pkh)
     }
 
-    fn lookup_tap_control_block(
+    fn lookup_tap_control_block_map(
         &self,
-        ver: LeafVersion,
-        script: &bitcoin::Script,
-    ) -> Option<&ControlBlock> {
-        (**self).lookup_tap_control_block(ver, script)
+    ) -> Option<&BTreeMap<ControlBlock, (bitcoin::Script, LeafVersion)>> {
+        (**self).lookup_tap_control_block_map()
     }
 
     fn lookup_sha256(&self, h: sha256::Hash) -> Option<Preimage32> {
@@ -506,14 +500,12 @@ macro_rules! impl_tuple_satisfier {
                 None
             }
 
-            fn lookup_tap_control_block(
+            fn lookup_tap_control_block_map(
                 &self,
-                ver: LeafVersion,
-                script: &bitcoin::Script,
-            ) -> Option<&ControlBlock> {
+            ) -> Option<&BTreeMap<ControlBlock, (bitcoin::Script, LeafVersion)>> {
                 let &($(ref $ty,)*) = self;
                 $(
-                    if let Some(result) = $ty.lookup_tap_control_block(ver, script) {
+                    if let Some(result) = $ty.lookup_tap_control_block_map() {
                         return Some(result);
                     }
                 )*

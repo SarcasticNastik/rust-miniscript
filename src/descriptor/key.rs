@@ -12,6 +12,8 @@ use bitcoin::{
 
 use MiniscriptKey;
 
+// use crate::Descriptor;
+
 /// The MiniscriptKey corresponding to Descriptors. This can
 /// either be Single public key or a Xpub
 #[derive(Debug, Eq, PartialEq, Clone, Ord, PartialOrd, Hash)]
@@ -667,6 +669,11 @@ impl MiniscriptKey for DescriptorPublicKey {
         self.clone()
     }
 }
+
+// impl Descriptor<DescriptorPublicKey> {
+//     /// derive a [`Descriptor`] with a concrete [`bitcoin::PublicKey`] at a given index
+//     /// You can use all the methods from descriptor trait on this
+// }
 
 #[cfg(test)]
 mod test {

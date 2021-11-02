@@ -29,7 +29,7 @@ use std::{
     str::{self, FromStr},
 };
 
-use bitcoin::secp256k1;
+use bitcoin::secp256k1::{self, Secp256k1};
 use bitcoin::{self, Script};
 
 use self::checksum::verify_checksum;
@@ -535,6 +535,24 @@ impl Descriptor<DescriptorPublicKey> {
     /// Panics if given an index ≥ 2^31
     pub fn derive(&self, index: u32) -> Descriptor<DescriptorPublicKey> {
         self.translate_pk2_infallible(|pk| pk.clone().derive(index))
+    }
+
+    /// derive a [`Descriptor`] with a concrete [`bitcoin::PublicKey`] at a given index
+    /// Removes all extended pubkeys and wildcards from the descriptor and only leaves
+    /// concrete [`bitcoin::PublicKey`]
+    ///
+    /// # Panics
+    ///
+    /// Panics if given an index ≥ 2^31
+    pub fn derive_desc<C: secp256k1::Verification>(
+        &self,
+        index: u32,
+        secp_ctx: Secp256k1<C>,
+    ) -> Result<Descriptor<bitcoin::PublicKey>, ConversionError> {
+        let derived = self
+            .derive(index)
+            .translate_pk2(|xpk| xpk.derive_public_key(&secp_ctx))?;
+        todo!()
     }
 
     /// Parse a descriptor that may contain secret keys

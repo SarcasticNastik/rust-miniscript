@@ -2,13 +2,14 @@
 
 use crate::policy::semantic::Policy;
 use crate::policy::Liftable;
-use crate::util::{varint_len, witness_size, MsKeyBuilder};
+// use crate::util::{varint_len, witness_size, MsKeyBuilder};
+use crate::util::{varint_len, witness_size};
 use crate::{DescriptorTrait, ForEach, ForEachKey, Satisfier, ToPublicKey, TranslatePk};
 
 use super::checksum::{desc_checksum, verify_checksum};
-use bitcoin::blockdata::opcodes;
+// use bitcoin::blockdata::opcodes;
 use bitcoin::hashes::_export::_core::fmt::Formatter;
-use bitcoin::schnorr::TapTweak;
+// use bitcoin::schnorr::TapTweak;
 use bitcoin::util::taproot::TAPROOT_CONTROL_NODE_SIZE;
 use bitcoin::util::taproot::{
     LeafVersion, TaprootBuilder, TaprootBuilderError, TaprootSpendInfo, TAPROOT_CONTROL_BASE_SIZE,
@@ -210,7 +211,7 @@ impl<Pk: MiniscriptKey> Tr<Pk> {
                     TaprootBuilderError::EmptyTree => {
                         unreachable!("Taptree is a well formed tree with atleast 1 element")
                     }
-                    TaprootBuilderError::ScriptWeightOverflow => unreachable!(),
+                    // TaprootBuilderError::ScriptWeightOverflow => unreachable!(),
                 },
             };
             // Add the data
@@ -220,35 +221,35 @@ impl<Pk: MiniscriptKey> Tr<Pk> {
     }
 }
 
-impl<Pk: MiniscriptKey + ToPublicKey> Tr<Pk> {
-    /// Obtain the corresponding script pubkey for this descriptor
-    /// Same as[`DescriptorTrait::script_pubkey`] for this descriptor
-    pub fn spk(&self) -> Result<Script, Error> {
-        let spend_info = self
-            .spend_info
-            .as_ref()
-            .ok_or(Error::TaprootSpendInfoUnavialable)?;
-        let output_key = spend_info.output_key();
-        let builder = bitcoin::blockdata::script::Builder::new();
-        Ok(builder
-            .push_opcode(opcodes::all::OP_PUSHNUM_1)
-            .push_ms_key::<_, Tap>(&output_key)
-            .into_script())
-    }
-
-    /// Obtain the corresponding script pubkey for this descriptor
-    /// Same as[`DescriptorTrait::address`] for this descriptor
-    pub fn addr(&self, network: bitcoin::Network) -> Result<bitcoin::Address, Error> {
-        let spend_info = self
-            .spend_info
-            .as_ref()
-            .ok_or(Error::TaprootSpendInfoUnavialable)?;
-        Ok(bitcoin::Address::p2tr_tweaked(
-            TapTweak::dangerous_assume_tweaked(spend_info.output_key()),
-            network,
-        ))
-    }
-}
+// impl<Pk: MiniscriptKey + ToPublicKey> Tr<Pk> {
+//     /// Obtain the corresponding script pubkey for this descriptor
+//     /// Same as[`DescriptorTrait::script_pubkey`] for this descriptor
+//     pub fn spk(&self) -> Result<Script, Error> {
+//         let spend_info = self
+//             .spend_info
+//             .as_ref()
+//             .ok_or(Error::TaprootSpendInfoUnavialable)?;
+//         let output_key = spend_info.output_key();
+//         let builder = bitcoin::blockdata::script::Builder::new();
+//         Ok(builder
+//             .push_opcode(opcodes::all::OP_PUSHNUM_1)
+//             .push_ms_key::<_, Tap>(&output_key)
+//             .into_script())
+//     }
+//
+//     /// Obtain the corresponding script pubkey for this descriptor
+//     /// Same as[`DescriptorTrait::address`] for this descriptor
+//     pub fn addr(&self, network: bitcoin::Network) -> Result<bitcoin::Address, Error> {
+//         let spend_info = self
+//             .spend_info
+//             .as_ref()
+//             .ok_or(Error::TaprootSpendInfoUnavialable)?;
+//         Ok(bitcoin::Address::p2tr_tweaked(
+//             TapTweak::dangerous_assume_tweaked(spend_info.output_key()),
+//             network,
+//         ))
+//     }
+// }
 
 /// Iterator for Taproot structures
 /// Yields a pair of (depth, miniscript) in a depth first walk
@@ -518,14 +519,16 @@ impl<Pk: MiniscriptKey> DescriptorTrait<Pk> for Tr<Pk> {
     where
         Pk: ToPublicKey,
     {
-        self.addr(network)
+        // self.addr(network)
+        todo!()
     }
 
     fn script_pubkey(&self) -> Result<Script, Error>
     where
         Pk: ToPublicKey,
     {
-        self.spk()
+        // self.spk()
+        todo!()
     }
 
     fn unsigned_script_sig(&self) -> Script

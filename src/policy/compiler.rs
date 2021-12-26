@@ -992,9 +992,12 @@ where
                     }
                 })
                 .collect();
-
+            // TODO: Update the Ctx condition
+            if Ctx::is_tap() {
+                insert_wrap!(AstElemExt::terminal(Terminal::MultiA(k, key_vec)));
+            }
             if key_vec.len() == subs.len() && subs.len() <= 20 {
-                insert_wrap!(AstElemExt::terminal(Terminal::Multi(k, key_vec)));
+                    insert_wrap!(AstElemExt::terminal(Terminal::Multi(k, key_vec)));
             }
             // Not a threshold, it's always more optimal to translate it to and()s as we save the
             // resulting threshold check (N EQUAL) in any case.
@@ -1167,14 +1170,19 @@ mod tests {
 
     use miniscript::{satisfy, Legacy, Segwitv0};
     use policy::Liftable;
-    use script_num_size;
-    use BitcoinECSig;
+    use ::{script_num_size};
+    use ::{BitcoinECSig};
+    use ::{Tap};
 
     type SPolicy = Concrete<String>;
     type BPolicy = Concrete<bitcoin::PublicKey>;
     type DummySegwitAstElemExt = policy::compiler::AstElemExt<String, Segwitv0>;
     type SegwitMiniScript = Miniscript<bitcoin::PublicKey, Segwitv0>;
+    // type DummyTapAstElemExt = policy::compiler::AstElemExt<String, Tap>;
+    // type TapMiniScript = Miniscript<bitcoin::schnorr::PublicKey, Tap>;
 
+
+    // Creates generic bitcoin Public Keys
     fn pubkeys_and_a_sig(n: usize) -> (Vec<bitcoin::PublicKey>, secp256k1::Signature) {
         let mut ret = Vec::with_capacity(n);
         let secp = secp256k1::Secp256k1::new();
@@ -1199,6 +1207,33 @@ mod tests {
         );
         (ret, sig)
     }
+
+    // // TODO: Makes this function return Schnorr Signatures
+    // fn schnorr_pubkeys_and_a_sig(n: usize) -> (Vec<XOnlyPubKey>, secp256k1::Signature) {
+    //     let mut ret = Vec::with_capacity(n);
+    //     let secp = secp256k1::Secp256k1::new();
+    //     let mut sk = [0; 32];
+    //
+    //     for i in 1..n + 1 {
+    //         sk[0] = i as u8;
+    //         sk[1] = (i >> 8) as u8;
+    //         sk[2] = (i >> 16) as u8;
+    //
+    //         let pk = XOnlyPubKey {
+    //             key: secp256k1::schnorrsig::PublicKey::from_secret_key(
+    //                 &secp,
+    //                 &secp256k1::schnorrsig::SecretKey::from_slice(&sk[..]).expect("sk"),
+    //             ),
+    //             compressed: true,
+    //         };
+    //         ret.push(pk);
+    //     }
+    //     let sig = secp.sign(
+    //         &secp256k1::Message::from_slice(&sk[..]).expect("secret key"),
+    //         &secp256k1::SecretKey::from_slice(&sk[..]).expect("secret key"),
+    //     );
+    //     (ret, sig)
+    // }
 
     fn policy_compile_lift_check(s: &str) -> Result<(), CompilerError> {
         let policy = SPolicy::from_str(s).expect("parse");
@@ -1460,6 +1495,35 @@ mod tests {
             );
                 assert_eq!(big_thresh_ms, big_thresh_ms_expected);
             };
+        }
+    }
+
+    #[test]
+    fn compile_tr_thresh() {
+        // Get Schnorr Keys
+        // let (keys, _) = schonrr_pubkeys_and_a_sig(3);
+        // let keys = [];
+        //
+        // // Testing compilation of policy into miniscript
+        // for k in 1..4 {
+        //     let small_thresh: Concrete<XOnlyPubKey> = policy_str!(
+        //         "thresh({},pk({}),pk({}),pk({}))",
+        //         k, keys[0], keys[1], keys[2]
+        //     );
+        //     // Makes this compile for Tap
+        //     let small_thresh_ms:  Miniscript<XOnlyPubKey, Tap> =  dbg!(small_thresh.compile().unwrap());
+        //     let small_thresh_ms_expected: Miniscript<XOnlyPubKey, Tap> =
+        //         dbg!(ms_str!("multi({},{},{},{})", k, keys[0], keys[1], keys[2]));
+        //     assert_eq!(small_thresh_ms, small_thresh_ms_expected);
+        // }
+
+        // Up until 20 keys, thresh should be compiled to a multi no matter the value of k
+        for k in 1..4 {
+            let small_thresh: Concrete<String> = policy_str!("{}", &format!("thresh({},pk(B),pk(C),pk(D))",k));
+            let small_thresh_ms: Miniscript<String, Tap> = small_thresh.compile().unwrap();
+            let small_thresh_ms_expected: Miniscript<String, Tap> =
+                ms_str!("multi_a({},B,C,D)", k);
+            assert_eq!(small_thresh_ms, small_thresh_ms_expected);
         }
     }
 

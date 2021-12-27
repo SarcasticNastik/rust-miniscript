@@ -24,6 +24,7 @@ use util::{script_is_v1_tr, witness_size};
 use super::{sanity_check, Psbt};
 use super::{Error, InputError, PsbtInputSatisfier};
 use bitcoin::blockdata::witness::Witness;
+use bitcoin::secp256k1::XOnlyPublicKey;
 use bitcoin::secp256k1::{self, Secp256k1};
 use bitcoin::util::taproot::LeafVersion;
 use bitcoin::{self, PublicKey, Script};
@@ -32,7 +33,6 @@ use interpreter;
 use Descriptor;
 use Miniscript;
 use Satisfier;
-use XOnlyKey;
 use {BareCtx, Legacy, Segwitv0, Tap};
 
 // Satisfy the taproot descriptor. It is not possible to infer the complete
@@ -47,20 +47,22 @@ fn construct_tap_witness(
     assert!(script_is_v1_tr(&spk));
 
     // try the script spend path first
-    if let Some(sig) = <PsbtInputSatisfier as Satisfier<XOnlyKey>>::lookup_tap_key_spend_sig(sat) {
+    if let Some(sig) =
+        <PsbtInputSatisfier as Satisfier<XOnlyPublicKey>>::lookup_tap_key_spend_sig(sat)
+    {
         return Ok(vec![sig.to_vec()]);
     }
     // Next script spends
     let (mut min_wit, mut min_wit_len) = (None, None);
     if let Some(block_map) =
-        <PsbtInputSatisfier as Satisfier<XOnlyKey>>::lookup_tap_control_block_map(sat)
+        <PsbtInputSatisfier as Satisfier<XOnlyPublicKey>>::lookup_tap_control_block_map(sat)
     {
         for (control_block, (script, ver)) in block_map {
-            if *ver != LeafVersion::default() {
+            if *ver != LeafVersion::TapScript {
                 // We don't know how to satisfy non default version scripts yet
                 continue;
             }
-            let ms = match Miniscript::<XOnlyKey, Tap>::parse_insane(script) {
+            let ms = match Miniscript::<XOnlyPublicKey, Tap>::parse_insane(script) {
                 Ok(ms) => ms,
                 Err(..) => continue, // try another script
             };

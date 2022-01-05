@@ -33,7 +33,7 @@ use bitcoin::secp256k1::{self, Secp256k1};
 use bitcoin::{self, Script};
 
 use self::checksum::verify_checksum;
-use expression;
+use ::{expression, Tap};
 use miniscript;
 use miniscript::{Legacy, Miniscript, Segwitv0};
 use {
@@ -293,9 +293,34 @@ impl<Pk: MiniscriptKey> Descriptor<Pk> {
         Ok(Descriptor::Wsh(Wsh::new_sortedmulti(k, pks)?))
     }
 
+    // TODO: Using Huffman Encoding over the TapTree over the total number of bytes / (or
+    // TODO: encumberance bytes??)
+    // Since the script-spending path is optional, it's better to return an Option<>
+    fn optimize_taptree(ms: Miniscript<Pk, Tap>) -> Option<TapTree<Pk>> {
+
+        // TODO: 1. Check for internal keys
+        // TODO:    - Alter the policy structure to remove the internal key and change the
+        // TODO:      remaining policy for compilation.
+        // TODO: 2. Create nodes recursively using `or` disjunctive paths
+
+        let tree = TapTree::Leaf(Arc::new(ms));
+        Some(tree)
+    }
+
+    // // Return a `Pk` in accordance with BIP341
+    // fn internal_key(ms: &Miniscript<Pk, Tap>) -> Pk {
+    //     todo!()
+    // }
+
+
     /// Create new tr descriptor
     /// Errors when miniscript exceeds resource limits under Segwitv0 context
-    pub fn new_tr(key: Pk, script: Option<tr::TapTree<Pk>>) -> Result<Self, Error> {
+    pub fn new_tr(key: Option<Pk>, script: Miniscript<Pk, Tap>) -> Result<Self, Error> {
+        // let internal_key = match key {
+        //     Some(key) => key,
+        //     None => Descriptor::<Pk>::internal_key(&script),
+        // };
+        let script: Option<TapTree<Pk>> = Descriptor::<Pk>::optimize_taptree(script);
         Ok(Descriptor::Tr(Tr::new(key, script)?))
     }
 

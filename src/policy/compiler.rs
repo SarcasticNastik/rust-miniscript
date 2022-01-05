@@ -992,12 +992,12 @@ where
                     }
                 })
                 .collect();
-            // TODO: Update the Ctx condition
+
             if Ctx::is_tap() {
                 insert_wrap!(AstElemExt::terminal(Terminal::MultiA(k, key_vec)));
             }
-            if key_vec.len() == subs.len() && subs.len() <= 20 {
-                    insert_wrap!(AstElemExt::terminal(Terminal::Multi(k, key_vec)));
+            else if key_vec.len() == subs.len() && subs.len() <= 20 {
+                insert_wrap!(AstElemExt::terminal(Terminal::Multi(k, key_vec)));
             }
             // Not a threshold, it's always more optimal to translate it to and()s as we save the
             // resulting threshold check (N EQUAL) in any case.

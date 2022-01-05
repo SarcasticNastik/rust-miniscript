@@ -15,7 +15,7 @@ use bitcoin::util::taproot::{
     LeafVersion, TaprootBuilder, TaprootBuilderError, TaprootSpendInfo, TAPROOT_CONTROL_BASE_SIZE,
 };
 use bitcoin::{secp256k1, Script};
-use errstr;
+use ::{errstr};
 use expression::{self, FromTree, Tree};
 use miniscript::{limits::TAPROOT_MAX_NODE_COUNT, Miniscript};
 use std::cmp::{self, max};
@@ -114,18 +114,23 @@ impl<Pk: MiniscriptKey> fmt::Debug for TapTree<Pk> {
 
 impl<Pk: MiniscriptKey> Tr<Pk> {
     /// Create a new [`Tr`] descriptor from internal key and [`TapTree`]
-    pub fn new(internal_key: Pk, tree: Option<TapTree<Pk>>) -> Result<Self, Error> {
+    pub fn new(internal_key: Option<Pk>, tree: Option<TapTree<Pk>>) -> Result<Self, Error> {
         let nodes = match tree {
             Some(ref t) => t.taptree_height(),
             None => 0,
         };
 
         if nodes <= TAPROOT_MAX_NODE_COUNT {
-            Ok(Self {
-                internal_key,
-                tree,
-                spend_info: None,
-            })
+            if let Some(internal_key) = internal_key {
+                Ok(Self {
+                    internal_key,
+                    tree,
+                    spend_info: None,
+                })
+            }
+            else {
+                Err(Error::TaprootSpendInfoUnavialable)
+            }
         } else {
             Err(Error::MaxRecursiveDepthExceeded)
         }

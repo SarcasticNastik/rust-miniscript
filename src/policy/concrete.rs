@@ -19,9 +19,9 @@ use bitcoin::hashes::hex::FromHex;
 use bitcoin::hashes::{hash160, ripemd160, sha256, sha256d};
 use std::collections::HashSet;
 use std::{error, fmt, str};
+use ::{errstr};
 
 use super::ENTAILMENT_MAX_TERMINALS;
-use errstr;
 use expression::{self, FromTree};
 use miniscript::limits::{HEIGHT_TIME_THRESHOLD, SEQUENCE_LOCKTIME_TYPE_FLAG};
 use miniscript::types::extra_props::TimeLockInfo;
@@ -34,6 +34,8 @@ use policy::compiler::CompilerError;
 #[cfg(feature = "compiler")]
 use Miniscript;
 use {Error, ForEach, ForEachKey, MiniscriptKey};
+use ::{Tap, Descriptor};
+
 /// Concrete policy which corresponds directly to a Miniscript structure,
 /// and whose disjunctions are annotated with satisfaction probabilities
 /// to assist the compiler
@@ -128,6 +130,15 @@ impl fmt::Display for PolicyError {
 }
 
 impl<Pk: MiniscriptKey> Policy<Pk> {
+    #[cfg(feature="compiler")]
+    pub fn compile_to_tr(&self) -> Result<Descriptor<Pk>, Error> {
+        // TODO: Internal key, single-node TapLeaf
+        let ms = self.compile::<Tap>().unwrap();
+        // let default = Pk::from_str("").unwrap();
+        let descriptor: Descriptor<Pk> = Descriptor::new_tr(None, ms).unwrap();
+        Ok(descriptor)
+    }
+
     /// Compile the descriptor into an optimized `Miniscript` representation
     #[cfg(feature = "compiler")]
     pub fn compile<Ctx: ScriptContext>(&self) -> Result<Miniscript<Pk, Ctx>, CompilerError> {

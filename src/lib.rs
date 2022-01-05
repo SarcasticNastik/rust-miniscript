@@ -96,7 +96,7 @@
 #![deny(unused_mut)]
 #![deny(dead_code)]
 #![deny(unused_imports)]
-#![deny(missing_docs)]
+// #![deny(missing_docs)]
 
 pub extern crate bitcoin;
 #[cfg(feature = "serde")]

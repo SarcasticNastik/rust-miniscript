@@ -18,10 +18,11 @@
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::hashes::{hash160, ripemd160, sha256, sha256d};
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::{error, fmt, str};
 
 use super::ENTAILMENT_MAX_TERMINALS;
-use errstr;
+use descriptor::TapTree;
 use expression::{self, FromTree};
 use miniscript::limits::{HEIGHT_TIME_THRESHOLD, SEQUENCE_LOCKTIME_TYPE_FLAG};
 use miniscript::types::extra_props::TimeLockInfo;
@@ -33,7 +34,10 @@ use policy::compiler;
 use policy::compiler::CompilerError;
 #[cfg(feature = "compiler")]
 use Miniscript;
+use Tap;
+use {errstr, Descriptor};
 use {Error, ForEach, ForEachKey, MiniscriptKey};
+
 /// Concrete policy which corresponds directly to a Miniscript structure,
 /// and whose disjunctions are annotated with satisfaction probabilities
 /// to assist the compiler
@@ -128,6 +132,40 @@ impl fmt::Display for PolicyError {
 }
 
 impl<Pk: MiniscriptKey> Policy<Pk> {
+    /// TODO: Single-Node compilation
+    fn compile_huffman_taptree(policy: &Self) -> Result<TapTree<Pk>, Error> {
+        let compilation = policy.compile::<Tap>().unwrap();
+        Ok(TapTree::Leaf(Arc::new(compilation)))
+    }
+    /// Extract the [`internal_key`] from policy tree.
+    fn extract_key(policy: &Self, unspendable_key: Option<Pk>) -> Result<(Pk, &Policy<Pk>), Error> {
+        // TODO: `concrete` -> `semantic` -> `normalize` -> `satisfy_constraints` -> `check KeyHash <-> Hash` --lift-> `concrete`
+        // TODO: 1.`Err(errstr("No viable internal key for TapTree could be found."))`
+        // TODO: 1. Replace `internal_key` := `Policy::Unsatisfiable`.
+        // TODO: 1. [OPTIONAL] Normalize the resulting policy (But how?)
+        // TODO: 1. Return script and key
+        match unspendable_key {
+            Some(key) => Ok((key, policy)),
+            None => Err(errstr("No internal key found")),
+        }
+    }
+
+    /// Compile the [`Tr`] descriptor into optimized [`TapTree`] implementation
+    // TODO: We might require other compile errors for Taproot. Will discuss and update.
+    #[cfg(feature = "compiler")]
+    pub fn compile_tr<Ctx: ScriptContext>(
+        &self,
+        unspendable_key: Option<Pk>,
+    ) -> Result<Descriptor<Pk>, Error> {
+        let (internal_key, policy) = Self::extract_key(self, unspendable_key).unwrap();
+        let tree = Descriptor::new_tr(
+            internal_key,
+            Some(Self::compile_huffman_taptree(policy).unwrap()),
+        )
+        .unwrap();
+        Ok(tree)
+    }
+
     /// Compile the descriptor into an optimized `Miniscript` representation
     #[cfg(feature = "compiler")]
     pub fn compile<Ctx: ScriptContext>(&self) -> Result<Miniscript<Pk, Ctx>, CompilerError> {

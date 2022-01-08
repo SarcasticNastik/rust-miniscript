@@ -994,7 +994,9 @@ where
                 })
                 .collect();
 
-            if key_vec.len() == subs.len() && subs.len() <= MAX_PUBKEYS_PER_MULTISIG {
+            if Ctx::is_tap() {
+                insert_wrap!(AstElemExt::terminal(Terminal::MultiA(k, key_vec)));
+            } else if key_vec.len() == subs.len() && subs.len() <= MAX_PUBKEYS_PER_MULTISIG {
                 insert_wrap!(AstElemExt::terminal(Terminal::Multi(k, key_vec)));
             }
             // Not a threshold, it's always more optimal to translate it to and()s as we save the
@@ -1168,7 +1170,7 @@ mod tests {
 
     use miniscript::{satisfy, Legacy, Segwitv0};
     use policy::Liftable;
-    use script_num_size;
+    use {script_num_size, Tap};
 
     type SPolicy = Concrete<String>;
     type BPolicy = Concrete<bitcoin::PublicKey>;
@@ -1553,6 +1555,17 @@ mod tests {
                 policy::concrete::PolicyError::DuplicatePubKeys
             ))
         );
+    }
+
+    #[test]
+    fn compile_tr_thresh() {
+        for k in 1..4 {
+            let small_thresh: Concrete<String> =
+                policy_str!("{}", &format!("thresh({},pk(B),pk(C),pk(D))", k));
+            let small_thresh_ms: Miniscript<String, Tap> = small_thresh.compile().unwrap();
+            let small_thresh_ms_expected: Miniscript<String, Tap> = ms_str!("multi_a({},B,C,D)", k);
+            assert_eq!(small_thresh_ms, small_thresh_ms_expected);
+        }
     }
 }
 

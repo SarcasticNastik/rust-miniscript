@@ -234,24 +234,26 @@ impl<'psbt> PsbtInputSatisfier<'psbt> {
 
 impl<'psbt, Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for PsbtInputSatisfier<'psbt> {
     fn lookup_tap_key_spend_sig(&self) -> Option<bitcoin::SchnorrSig> {
-        if let Some((sig, hash_ty)) = self.psbt.inputs[self.index].tap_key_sig {
-            Some(bitcoin::SchnorrSig { sig, hash_ty })
-        } else {
-            None
-        }
+        // if let Some((sig, hash_ty)) = self.psbt.inputs[self.index].tap_key_sig {
+        //     Some(bitcoin::SchnorrSig { sig, hash_ty })
+        // } else {
+        //     None
+        // }
+        todo!()
     }
 
     fn lookup_tap_leaf_script_sig(&self, pk: &Pk, lh: &TapLeafHash) -> Option<bitcoin::SchnorrSig> {
-        let pk = pk.to_x_only_pubkey();
-
-        if let Some((sig, hash_ty)) = self.psbt.inputs[self.index].tap_script_sigs.get(&(pk, *lh)) {
-            Some(bitcoin::SchnorrSig {
-                sig: *sig,
-                hash_ty: *hash_ty,
-            })
-        } else {
-            None
-        }
+        // let pk = pk.to_x_only_pubkey();
+        //
+        // if let Some((sig, hash_ty)) = self.psbt.inputs[self.index].tap_script_sigs.get(&(pk, *lh)) {
+        //     Some(bitcoin::SchnorrSig {
+        //         sig: *sig,
+        //         hash_ty: *hash_ty,
+        //     })
+        // } else {
+        //     None
+        // }
+        todo!()
     }
 
     fn lookup_tap_control_block_map(
@@ -264,24 +266,25 @@ impl<'psbt, Pk: MiniscriptKey + ToPublicKey> Satisfier<Pk> for PsbtInputSatisfie
         &self,
         pkh: &(Pk::Hash, TapLeafHash),
     ) -> Option<(bitcoin::schnorr::PublicKey, bitcoin::SchnorrSig)> {
-        if let Some(((pk, _lh), sig)) = self.psbt.inputs[self.index]
-            .tap_script_sigs
-            .iter()
-            .filter(|&((pubkey, lh), _sig)| {
-                pubkey.to_pubkeyhash() == Pk::hash_to_hash160(&pkh.0) && *lh == pkh.1
-            })
-            .next()
-        {
-            Some((
-                *pk,
-                bitcoin::SchnorrSig {
-                    sig: sig.0,
-                    hash_ty: sig.1,
-                },
-            ))
-        } else {
-            None
-        }
+        // if let Some(((pk, _lh), sig)) = self.psbt.inputs[self.index]
+        //     .tap_script_sigs
+        //     .iter()
+        //     .filter(|&((pubkey, lh), _sig)| {
+        //         pubkey.to_pubkeyhash() == Pk::hash_to_hash160(&pkh.0) && *lh == pkh.1
+        //     })
+        //     .next()
+        // {
+        //     Some((
+        //         *pk,
+        //         bitcoin::SchnorrSig {
+        //             sig: sig.0,
+        //             hash_ty: sig.1,
+        //         },
+        //     ))
+        // } else {
+        //     None
+        // }
+        todo!()
     }
 
     fn lookup_ec_sig(&self, pk: &Pk) -> Option<bitcoin::EcdsaSig> {

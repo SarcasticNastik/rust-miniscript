@@ -18,10 +18,10 @@
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::hashes::{hash160, ripemd160, sha256, sha256d};
 use std::collections::HashSet;
-#[cfg(feature = "compiler")]
-use std::sync::Arc;
 use std::{error, fmt, str};
 
+#[cfg(feature = "compiler")]
+use super::Liftable;
 use super::ENTAILMENT_MAX_TERMINALS;
 #[cfg(feature = "compiler")]
 use descriptor::TapTree;
@@ -32,9 +32,11 @@ use miniscript::types::extra_props::TimeLockInfo;
 #[cfg(feature = "compiler")]
 use miniscript::ScriptContext;
 #[cfg(feature = "compiler")]
-use policy::compiler;
-#[cfg(feature = "compiler")]
 use policy::compiler::CompilerError;
+#[cfg(feature = "compiler")]
+use policy::{compiler, Semantic};
+#[cfg(feature = "compiler")]
+use std::sync::Arc;
 #[cfg(feature = "compiler")]
 use Descriptor;
 #[cfg(feature = "compiler")]
@@ -143,22 +145,39 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         let compilation = policy.compile::<Tap>().unwrap();
         Ok(TapTree::Leaf(Arc::new(compilation)))
     }
-    /// Extract the Taproot internal_key from policy tree.
+    /// Extract the internal_key from policy tree.
     #[cfg(feature = "compiler")]
-    fn extract_key(policy: &Self, unspendable_key: Option<Pk>) -> Result<(Pk, &Policy<Pk>), Error> {
-        match unspendable_key {
-            Some(key) => Ok((key, policy)),
-            None => Err(errstr("No internal key found")),
+    fn extract_key(policy: &Self, unspendable_key: Option<Pk>) -> Result<(Pk, Policy<Pk>), Error> {
+        let semantic_policy = policy.lift()?;
+        let concrete_keys = policy.keys().into_iter().collect::<HashSet<_>>();
+        let mut internal_key: Option<Pk> = None;
+
+        for key in concrete_keys.iter() {
+            if semantic_policy
+                .clone()
+                .satisfy_constraint(&Semantic::KeyHash(key.to_pubkeyhash()), true)
+                == Semantic::Trivial
+            {
+                internal_key = Some((*key).clone());
+                break;
+            }
+        }
+
+        match (internal_key, unspendable_key) {
+            (Some(key), _) => Ok((key.clone(), policy.translate_unsatisfiable_pk(&key))),
+            (_, Some(key)) => Ok((key, policy.clone())),
+            _ => Err(errstr("No viable internal key found.")),
         }
     }
 
     /// Compile the [`Tr`] descriptor into optimized [`TapTree`] implementation
+    // TODO: We might require other compile errors for Taproot. Will discuss and update.
     #[cfg(feature = "compiler")]
     pub fn compile_tr(&self, unspendable_key: Option<Pk>) -> Result<Descriptor<Pk>, Error> {
         let (internal_key, policy) = Self::extract_key(self, unspendable_key).unwrap();
         let tree = Descriptor::new_tr(
             internal_key,
-            Some(Self::compile_huffman_taptree(policy).unwrap()),
+            Some(Self::compile_huffman_taptree(&policy).unwrap()),
         )
         .unwrap();
         Ok(tree)
@@ -261,6 +280,30 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     .map(|&(ref prob, ref sub)| Ok((*prob, sub._translate_pk(translatefpk)?)))
                     .collect::<Result<Vec<(usize, Policy<Q>)>, E>>()?,
             )),
+        }
+    }
+
+    /// Translate `Semantic::Key(key)` to `Semantic::Unsatisfiable` when extracting TapKey
+    pub fn translate_unsatisfiable_pk(&self, key: &Pk) -> Policy<Pk> {
+        match self {
+            Policy::Key(k) if *k == *key => Policy::Unsatisfiable,
+            Policy::And(ref subs) => Policy::And(
+                subs.iter()
+                    .map(|sub| sub.translate_unsatisfiable_pk(key))
+                    .collect::<Vec<_>>(),
+            ),
+            Policy::Or(ref subs) => Policy::Or(
+                subs.iter()
+                    .map(|(k, sub)| (*k, sub.translate_unsatisfiable_pk(key)))
+                    .collect::<Vec<_>>(),
+            ),
+            Policy::Threshold(k, ref subs) => Policy::Threshold(
+                *k,
+                subs.iter()
+                    .map(|sub| sub.translate_unsatisfiable_pk(key))
+                    .collect::<Vec<_>>(),
+            ),
+            x => x.clone(),
         }
     }
 

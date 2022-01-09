@@ -374,16 +374,13 @@ mod tests {
     #[test]
     #[cfg(feature = "compiler")]
     fn single_leaf_tr_compile() {
-        for k in 1..5 {
-            let unspendable_key: String = "z".to_string();
-            let policy: Concrete<String> = policy_str!("thresh({},pk(A),pk(B),pk(C),pk(D))", k);
-            let descriptor = policy.compile_tr(Some(unspendable_key.clone())).unwrap();
+        let unspendable_key: String = "UNSPENDABLE".to_string();
+        let policy: Concrete<String> = policy_str!("thresh(2,pk(A),pk(A),pk(C),pk(D))");
+        let descriptor = policy.compile_tr(Some(unspendable_key.clone())).unwrap();
 
-            let ms_compilation: Miniscript<String, Tap> = ms_str!("multi_a({},A,B,C,D)", k);
-            let tree: TapTree<String> = TapTree::Leaf(Arc::new(ms_compilation));
-            let expected_descriptor = Descriptor::new_tr(unspendable_key, Some(tree)).unwrap();
-
-            assert_eq!(descriptor, expected_descriptor);
-        }
+        let ms_compilation: Miniscript<String, Tap> = ms_str!("multi_a(2,C,D)");
+        let tree: TapTree<String> = TapTree::Leaf(Arc::new(ms_compilation));
+        let expected_descriptor = Descriptor::new_tr("A".to_string(), Some(tree)).unwrap();
+        assert_eq!(descriptor, expected_descriptor);
     }
 }

@@ -189,7 +189,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     // policy.
     // Witness is currently encoded as policy. Only accepts leaf fragment and
     // a normalized policy
-    fn satisfy_constraint(self, witness: &Policy<Pk>, available: bool) -> Policy<Pk> {
+    pub(crate) fn satisfy_constraint(self, witness: &Policy<Pk>, available: bool) -> Policy<Pk> {
         debug_assert!(self.clone().normalized() == self.clone());
         match *witness {
             // only for internal purposes, safe to use unreachable!
@@ -679,10 +679,7 @@ mod tests {
         let policy = StringPolicy::from_str("or(pkh(),older(1000))").unwrap();
         assert_eq!(
             policy,
-            Policy::Threshold(
-                1,
-                vec![Policy::KeyHash("".to_owned()), Policy::Older(1000),]
-            )
+            Policy::Threshold(1, vec![Policy::KeyHash("".to_owned()), Policy::Older(1000)])
         );
         assert_eq!(policy.relative_timelocks(), vec![1000]);
         assert_eq!(policy.absolute_timelocks(), vec![]);
@@ -698,7 +695,7 @@ mod tests {
             policy,
             Policy::Threshold(
                 1,
-                vec![Policy::KeyHash("".to_owned()), Policy::Unsatisfiable,]
+                vec![Policy::KeyHash("".to_owned()), Policy::Unsatisfiable],
             )
         );
         assert_eq!(policy.relative_timelocks(), vec![]);
@@ -711,7 +708,7 @@ mod tests {
             policy,
             Policy::Threshold(
                 2,
-                vec![Policy::KeyHash("".to_owned()), Policy::Unsatisfiable,]
+                vec![Policy::KeyHash("".to_owned()), Policy::Unsatisfiable],
             )
         );
         assert_eq!(policy.relative_timelocks(), vec![]);
@@ -735,7 +732,7 @@ mod tests {
                     Policy::Older(1000),
                     Policy::Older(2000),
                     Policy::Older(2000),
-                ]
+                ],
             )
         );
         assert_eq!(
@@ -759,7 +756,7 @@ mod tests {
                     Policy::Older(1000),
                     Policy::Unsatisfiable,
                     Policy::Unsatisfiable,
-                ]
+                ],
             )
         );
         assert_eq!(

@@ -15,13 +15,13 @@
 //! Concrete Policies
 //!
 
-use bitcoin::hashes::hex::FromHex;
-use bitcoin::hashes::{hash160, ripemd160, sha256, sha256d};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::{error, fmt, str};
 
-use super::ENTAILMENT_MAX_TERMINALS;
+use bitcoin::hashes::hex::FromHex;
+use bitcoin::hashes::{hash160, ripemd160, sha256, sha256d};
+
 use descriptor::TapTree;
 use expression::{self, FromTree};
 use miniscript::limits::{HEIGHT_TIME_THRESHOLD, SEQUENCE_LOCKTIME_TYPE_FLAG};
@@ -32,11 +32,14 @@ use miniscript::ScriptContext;
 use policy::compiler;
 #[cfg(feature = "compiler")]
 use policy::compiler::CompilerError;
+use policy::{Liftable, Semantic};
 #[cfg(feature = "compiler")]
 use Miniscript;
 use Tap;
 use {errstr, Descriptor};
 use {Error, ForEach, ForEachKey, MiniscriptKey};
+
+use super::ENTAILMENT_MAX_TERMINALS;
 
 /// Concrete policy which corresponds directly to a Miniscript structure,
 /// and whose disjunctions are annotated with satisfaction probabilities
@@ -133,20 +136,31 @@ impl fmt::Display for PolicyError {
 
 impl<Pk: MiniscriptKey> Policy<Pk> {
     /// TODO: Single-Node compilation
-    fn compile_huffman_taptree(policy: &Self) -> Result<TapTree<Pk>, Error> {
+    fn compile_huffman_taptree(policy: Self) -> Result<TapTree<Pk>, Error> {
         let compilation = policy.compile::<Tap>().unwrap();
         Ok(TapTree::Leaf(Arc::new(compilation)))
     }
     /// Extract the [`internal_key`] from policy tree.
-    fn extract_key(policy: &Self, unspendable_key: Option<Pk>) -> Result<(Pk, &Policy<Pk>), Error> {
-        // TODO: `concrete` -> `semantic` -> `normalize` -> `satisfy_constraints` -> `check KeyHash <-> Hash` --lift-> `concrete`
-        // TODO: 1.`Err(errstr("No viable internal key for TapTree could be found."))`
-        // TODO: 1. Replace `internal_key` := `Policy::Unsatisfiable`.
-        // TODO: 1. [OPTIONAL] Normalize the resulting policy (But how?)
-        // TODO: 1. Return script and key
-        match unspendable_key {
-            Some(key) => Ok((key, policy)),
-            None => Err(errstr("No internal key found")),
+    /// `concrete` --lift--> `semantic` --satisfy_constraint--> `internal_key, new_policy`
+    fn extract_key(policy: &Self, unspendable_key: Option<Pk>) -> Result<(Pk, Policy<Pk>), Error> {
+        let semantic_policy = policy.lift()?;
+        let concrete_keys = policy.keys();
+        let mut internal_key: Option<Pk> = None;
+
+        for key in concrete_keys {
+            if semantic_policy
+                .clone()
+                .satisfy_constraint(&Semantic::KeyHash(key.to_pubkeyhash()), true)
+                == Semantic::Trivial
+            {
+                internal_key = Some(key.clone());
+            }
+        }
+
+        match (internal_key, unspendable_key) {
+            (Some(key), _) => Ok((key.clone(), policy.translate_unsatisfiable_pk(&key))),
+            (_, Some(key)) => Ok((key, policy.clone())),
+            _ => Err(errstr("No viable internal key found.")),
         }
     }
 
@@ -160,7 +174,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         let (internal_key, policy) = Self::extract_key(self, unspendable_key).unwrap();
         let tree = Descriptor::new_tr(
             internal_key,
-            Some(Self::compile_huffman_taptree(policy).unwrap()),
+            Some(Self::compile_huffman_taptree(policy).unwrap()), // consume the policy
         )
         .unwrap();
         Ok(tree)
@@ -263,6 +277,30 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     .map(|&(ref prob, ref sub)| Ok((*prob, sub._translate_pk(translatefpk)?)))
                     .collect::<Result<Vec<(usize, Policy<Q>)>, E>>()?,
             )),
+        }
+    }
+
+    /// Translate `Semantic::Key(key)` to `Semantic::Unsatisfiable` when extracting TapKey
+    pub fn translate_unsatisfiable_pk(&self, key: &Pk) -> Policy<Pk> {
+        match self {
+            Policy::Key(key) => Policy::Unsatisfiable,
+            Policy::And(ref subs) => Policy::And(
+                subs.iter()
+                    .map(|sub| sub.translate_unsatisfiable_pk(key))
+                    .collect::<Vec<_>>(),
+            ),
+            Policy::Or(ref subs) => Policy::Or(
+                subs.iter()
+                    .map(|(k, sub)| (*k, sub.translate_unsatisfiable_pk(key)))
+                    .collect::<Vec<_>>(),
+            ),
+            Policy::Threshold(k, ref subs) => Policy::Threshold(
+                *k,
+                subs.iter()
+                    .map(|sub| sub.translate_unsatisfiable_pk(key))
+                    .collect::<Vec<_>>(),
+            ),
+            x => x.clone(),
         }
     }
 

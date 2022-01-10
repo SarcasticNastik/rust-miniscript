@@ -18,9 +18,13 @@
 use bitcoin::hashes::hex::FromHex;
 use bitcoin::hashes::{hash160, ripemd160, sha256, sha256d};
 use std::collections::HashSet;
+#[cfg(feature = "compiler")]
+use std::sync::Arc;
 use std::{error, fmt, str};
 
 use super::ENTAILMENT_MAX_TERMINALS;
+#[cfg(feature = "compiler")]
+use descriptor::TapTree;
 use errstr;
 use expression::{self, FromTree};
 use miniscript::limits::{HEIGHT_TIME_THRESHOLD, SEQUENCE_LOCKTIME_TYPE_FLAG};
@@ -32,8 +36,13 @@ use policy::compiler;
 #[cfg(feature = "compiler")]
 use policy::compiler::CompilerError;
 #[cfg(feature = "compiler")]
+use Descriptor;
+#[cfg(feature = "compiler")]
 use Miniscript;
+#[cfg(feature = "compiler")]
+use Tap;
 use {Error, ForEach, ForEachKey, MiniscriptKey};
+
 /// Concrete policy which corresponds directly to a Miniscript structure,
 /// and whose disjunctions are annotated with satisfaction probabilities
 /// to assist the compiler
@@ -128,6 +137,33 @@ impl fmt::Display for PolicyError {
 }
 
 impl<Pk: MiniscriptKey> Policy<Pk> {
+    /// Single-Node compilation
+    #[cfg(feature = "compiler")]
+    fn compile_huffman_taptree(policy: &Self) -> Result<TapTree<Pk>, Error> {
+        let compilation = policy.compile::<Tap>().unwrap();
+        Ok(TapTree::Leaf(Arc::new(compilation)))
+    }
+    /// Extract the Taproot internal_key from policy tree.
+    #[cfg(feature = "compiler")]
+    fn extract_key(policy: &Self, unspendable_key: Option<Pk>) -> Result<(Pk, &Policy<Pk>), Error> {
+        match unspendable_key {
+            Some(key) => Ok((key, policy)),
+            None => Err(errstr("No internal key found")),
+        }
+    }
+
+    /// Compile the [`Tr`] descriptor into optimized [`TapTree`] implementation
+    #[cfg(feature = "compiler")]
+    pub fn compile_tr(&self, unspendable_key: Option<Pk>) -> Result<Descriptor<Pk>, Error> {
+        let (internal_key, policy) = Self::extract_key(self, unspendable_key).unwrap();
+        let tree = Descriptor::new_tr(
+            internal_key,
+            Some(Self::compile_huffman_taptree(policy).unwrap()),
+        )
+        .unwrap();
+        Ok(tree)
+    }
+
     /// Compile the descriptor into an optimized `Miniscript` representation
     #[cfg(feature = "compiler")]
     pub fn compile<Ctx: ScriptContext>(&self) -> Result<Miniscript<Pk, Ctx>, CompilerError> {

@@ -25,15 +25,14 @@ use crate::errstr;
 use crate::expression::{self, FromTree};
 use crate::miniscript::limits::{HEIGHT_TIME_THRESHOLD, SEQUENCE_LOCKTIME_TYPE_FLAG};
 use crate::miniscript::types::extra_props::TimeLockInfo;
-#[cfg(feature = "compiler")]
-use crate::miniscript::ScriptContext;
-#[cfg(feature = "compiler")]
-use crate::policy::compiler;
-#[cfg(feature = "compiler")]
-use crate::policy::compiler::CompilerError;
-#[cfg(feature = "compiler")]
-use crate::Miniscript;
 use crate::{Error, ForEach, ForEachKey, MiniscriptKey};
+#[cfg(feature = "compiler")]
+use {
+    crate::descriptor::TapTree, crate::miniscript::ScriptContext, crate::policy::compiler,
+    crate::policy::compiler::CompilerError, crate::Descriptor, crate::Miniscript, crate::Tap,
+    std::sync::Arc,
+};
+
 /// Concrete policy which corresponds directly to a Miniscript structure,
 /// and whose disjunctions are annotated with satisfaction probabilities
 /// to assist the compiler
@@ -128,6 +127,30 @@ impl fmt::Display for PolicyError {
 }
 
 impl<Pk: MiniscriptKey> Policy<Pk> {
+    /// Single-Node compilation
+    #[cfg(feature = "compiler")]
+    fn compile_leaf_taptree(&self) -> Result<TapTree<Pk>, Error> {
+        let compilation = self.compile::<Tap>().unwrap();
+        Ok(TapTree::Leaf(Arc::new(compilation)))
+    }
+
+    /// Extract the Taproot internal_key from policy tree.
+    #[cfg(feature = "compiler")]
+    fn extract_key(&self, unspendable_key: Option<Pk>) -> Result<(Pk, &Policy<Pk>), Error> {
+        match unspendable_key {
+            Some(key) => Ok((key, self)),
+            None => Err(errstr("No internal key found")),
+        }
+    }
+
+    /// Compile the [`Tr`] descriptor into optimized [`TapTree`] implementation
+    #[cfg(feature = "compiler")]
+    pub fn compile_tr(&self, unspendable_key: Option<Pk>) -> Result<Descriptor<Pk>, Error> {
+        let (internal_key, policy) = self.extract_key(unspendable_key)?;
+        let tree = Descriptor::new_tr(internal_key, Some(policy.compile_leaf_taptree()?))?;
+        Ok(tree)
+    }
+
     /// Compile the descriptor into an optimized `Miniscript` representation
     #[cfg(feature = "compiler")]
     pub fn compile<Ctx: ScriptContext>(&self) -> Result<Miniscript<Pk, Ctx>, CompilerError> {

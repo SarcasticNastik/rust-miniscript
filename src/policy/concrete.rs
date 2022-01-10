@@ -15,29 +15,29 @@
 //! Concrete Policies
 //!
 
+use std::{error, fmt, str};
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::{error, fmt, str};
 
-use bitcoin::hashes::hex::FromHex;
 use bitcoin::hashes::{hash160, ripemd160, sha256, sha256d};
+use bitcoin::hashes::hex::FromHex;
 
+use {Descriptor, errstr};
+use {Error, ForEach, ForEachKey, MiniscriptKey};
 use descriptor::TapTree;
 use expression::{self, FromTree};
+#[cfg(feature = "compiler")]
+use Miniscript;
 use miniscript::limits::{HEIGHT_TIME_THRESHOLD, SEQUENCE_LOCKTIME_TYPE_FLAG};
-use miniscript::types::extra_props::TimeLockInfo;
 #[cfg(feature = "compiler")]
 use miniscript::ScriptContext;
+use miniscript::types::extra_props::TimeLockInfo;
+use policy::{Liftable, Semantic};
 #[cfg(feature = "compiler")]
 use policy::compiler;
 #[cfg(feature = "compiler")]
 use policy::compiler::CompilerError;
-use policy::{Liftable, Semantic};
-#[cfg(feature = "compiler")]
-use Miniscript;
 use Tap;
-use {errstr, Descriptor};
-use {Error, ForEach, ForEachKey, MiniscriptKey};
 
 use super::ENTAILMENT_MAX_TERMINALS;
 
@@ -144,16 +144,17 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// `concrete` --lift--> `semantic` --satisfy_constraint--> `internal_key, new_policy`
     fn extract_key(policy: &Self, unspendable_key: Option<Pk>) -> Result<(Pk, Policy<Pk>), Error> {
         let semantic_policy = policy.lift()?;
-        let concrete_keys = policy.keys();
+        let concrete_keys = policy.keys().into_iter().collect::<HashSet<_>>();
         let mut internal_key: Option<Pk> = None;
 
-        for key in concrete_keys {
+        for key in concrete_keys.iter() {
             if semantic_policy
                 .clone()
                 .satisfy_constraint(&Semantic::KeyHash(key.to_pubkeyhash()), true)
                 == Semantic::Trivial
             {
-                internal_key = Some(key.clone());
+                internal_key = Some((*key).clone());
+                break;
             }
         }
 
@@ -176,7 +177,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             internal_key,
             Some(Self::compile_huffman_taptree(policy).unwrap()), // consume the policy
         )
-        .unwrap();
+            .unwrap();
         Ok(tree)
     }
 
@@ -194,9 +195,9 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
 
 impl<Pk: MiniscriptKey> ForEachKey<Pk> for Policy<Pk> {
     fn for_each_key<'a, F: FnMut(ForEach<'a, Pk>) -> bool>(&'a self, mut pred: F) -> bool
-    where
-        Pk: 'a,
-        Pk::Hash: 'a,
+        where
+            Pk: 'a,
+            Pk::Hash: 'a,
     {
         match *self {
             Policy::Unsatisfiable | Policy::Trivial => true,
@@ -238,17 +239,17 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// assert_eq!(real_policy, expected_policy);
     /// ```
     pub fn translate_pk<Fpk, Q, E>(&self, mut translatefpk: Fpk) -> Result<Policy<Q>, E>
-    where
-        Fpk: FnMut(&Pk) -> Result<Q, E>,
-        Q: MiniscriptKey,
+        where
+            Fpk: FnMut(&Pk) -> Result<Q, E>,
+            Q: MiniscriptKey,
     {
         self._translate_pk(&mut translatefpk)
     }
 
     fn _translate_pk<Fpk, Q, E>(&self, translatefpk: &mut Fpk) -> Result<Policy<Q>, E>
-    where
-        Fpk: FnMut(&Pk) -> Result<Q, E>,
-        Q: MiniscriptKey,
+        where
+            Fpk: FnMut(&Pk) -> Result<Q, E>,
+            Q: MiniscriptKey,
     {
         match *self {
             Policy::Unsatisfiable => Ok(Policy::Unsatisfiable),
@@ -283,7 +284,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// Translate `Semantic::Key(key)` to `Semantic::Unsatisfiable` when extracting TapKey
     pub fn translate_unsatisfiable_pk(&self, key: &Pk) -> Policy<Pk> {
         match self {
-            Policy::Key(key) => Policy::Unsatisfiable,
+            Policy::Key(k) if *k == *key => Policy::Unsatisfiable,
             Policy::And(ref subs) => Policy::And(
                 subs.iter()
                     .map(|sub| sub.translate_unsatisfiable_pk(key))
@@ -585,11 +586,11 @@ impl<Pk: MiniscriptKey> fmt::Display for Policy<Pk> {
 }
 
 impl<Pk> str::FromStr for Policy<Pk>
-where
-    Pk: MiniscriptKey + str::FromStr,
-    Pk::Hash: str::FromStr,
-    <Pk as str::FromStr>::Err: ToString,
-    <<Pk as MiniscriptKey>::Hash as str::FromStr>::Err: ToString,
+    where
+        Pk: MiniscriptKey + str::FromStr,
+        Pk::Hash: str::FromStr,
+        <Pk as str::FromStr>::Err: ToString,
+        <<Pk as MiniscriptKey>::Hash as str::FromStr>::Err: ToString,
 {
     type Err = Error;
 
@@ -610,10 +611,10 @@ where
 serde_string_impl_pk!(Policy, "a miniscript concrete policy");
 
 impl<Pk> Policy<Pk>
-where
-    Pk: MiniscriptKey + str::FromStr,
-    Pk::Hash: str::FromStr,
-    <Pk as str::FromStr>::Err: ToString,
+    where
+        Pk: MiniscriptKey + str::FromStr,
+        Pk::Hash: str::FromStr,
+        <Pk as str::FromStr>::Err: ToString,
 {
     /// Helper function for `from_tree` to parse subexpressions with
     /// names of the form x@y
@@ -716,15 +717,15 @@ where
             }
             _ => Err(errstr(top.name)),
         }
-        .map(|res| (frag_prob, res))
+            .map(|res| (frag_prob, res))
     }
 }
 
 impl<Pk> FromTree for Policy<Pk>
-where
-    Pk: MiniscriptKey + str::FromStr,
-    Pk::Hash: str::FromStr,
-    <Pk as str::FromStr>::Err: ToString,
+    where
+        Pk: MiniscriptKey + str::FromStr,
+        Pk::Hash: str::FromStr,
+        <Pk as str::FromStr>::Err: ToString,
 {
     fn from_tree(top: &expression::Tree) -> Result<Policy<Pk>, Error> {
         Policy::from_tree_prob(top, false).map(|(_, result)| result)

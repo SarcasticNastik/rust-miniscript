@@ -16,30 +16,31 @@
 //!
 
 use std::{error, fmt, str};
+// use std::cmp::Reverse;
 use std::collections::HashSet;
-use std::sync::Arc;
 
-use bitcoin::hashes::{hash160, ripemd160, sha256, sha256d};
 use bitcoin::hashes::hex::FromHex;
+use bitcoin::hashes::{hash160, ripemd160, sha256, sha256d};
 
-use {Descriptor, errstr};
-use {Error, ForEach, ForEachKey, MiniscriptKey};
 use descriptor::TapTree;
 use expression::{self, FromTree};
-#[cfg(feature = "compiler")]
-use Miniscript;
 use miniscript::limits::{HEIGHT_TIME_THRESHOLD, SEQUENCE_LOCKTIME_TYPE_FLAG};
+use miniscript::types::extra_props::TimeLockInfo;
 #[cfg(feature = "compiler")]
 use miniscript::ScriptContext;
-use miniscript::types::extra_props::TimeLockInfo;
-use policy::{Liftable, Semantic};
 #[cfg(feature = "compiler")]
 use policy::compiler;
 #[cfg(feature = "compiler")]
 use policy::compiler::CompilerError;
-use Tap;
+use policy::{Liftable, Semantic};
+#[cfg(feature = "compiler")]
+use Miniscript;
+use {errstr, Descriptor};
+use {Error, ForEach, ForEachKey, MiniscriptKey};
 
 use super::ENTAILMENT_MAX_TERMINALS;
+
+// use std::sync::Arc;
 
 /// Concrete policy which corresponds directly to a Miniscript structure,
 /// and whose disjunctions are annotated with satisfaction probabilities
@@ -135,13 +136,59 @@ impl fmt::Display for PolicyError {
 }
 
 impl<Pk: MiniscriptKey> Policy<Pk> {
-    /// TODO: Single-Node compilation
-    fn compile_huffman_taptree(policy: Self) -> Result<TapTree<Pk>, Error> {
-        let compilation = policy.compile::<Tap>().unwrap();
-        Ok(TapTree::Leaf(Arc::new(compilation)))
+    /// Create a Huffman Tree from compiled Miniscript nodes
+    fn with_huffman_tree<T, Ctx>(
+        policy: Vec<(f64, Miniscript<Pk, Ctx>)>,
+        f: T,
+    ) -> Result<TapTree<Pk>, Error>
+        where
+            T: Fn(&u32) -> u32,
+            Ctx: ScriptContext,
+    {
+        // Pattern match terminal Or/ Terminal (with equal odds)
+        todo!()
     }
+
+    /// Flatten the [`Policy`] tree structure into a Vector with corresponding leaf probability
+    fn flatten_policy<Ctx: ScriptContext>(&self, prob: f64) -> Vec<(f64, Policy<Pk>)> {
+        match *self {
+            Policy::Or(ref subs) => {
+                let total_odds: usize = subs.iter().map(|(ref k, _)| k).sum();
+                subs.iter()
+                    .map(|(k, ref policy)| {
+                        policy.flatten_policy::<Ctx>(prob * *k as f64 / total_odds as f64)
+                    })
+                    .flatten()
+                    .collect::<Vec<_>>()
+            }
+            Policy::Threshold(k, ref subs) if k == 1 => {
+                let total_odds = subs.len();
+                subs.iter()
+                    .map(|policy| policy.flatten_policy::<Ctx>(prob / total_odds as f64))
+                    .flatten()
+                    .collect::<Vec<_>>()
+            }
+            ref x => vec![(prob, x.clone())],
+        }
+    }
+
+    /// Compile [`Policy::Or`] and [`Policy::Threshold`] according to odds
+    fn compile_tr_policy<Ctx: ScriptContext>(&self) -> Result<TapTree<Pk>, Error> {
+        if !Ctx::is_tap() {
+            return Err(errstr("Taproot script should compile with `Tap` context"));
+        }
+
+        let leaf_compilations: Vec<_> = self
+            .flatten_policy::<Ctx>(1.0)
+            .into_iter()
+            .map(|(prob, ref policy)| (prob, policy.compile::<Ctx>().unwrap()))
+            .collect();
+        let taptree = Self::with_huffman_tree::<_, Ctx>(leaf_compilations, |x| *x).unwrap();
+        Ok(taptree)
+    }
+
     /// Extract the [`internal_key`] from policy tree.
-    /// `concrete` --lift--> `semantic` --satisfy_constraint--> `internal_key, new_policy`
+    /// [`Policy`] --[`lift`]--> [`Semantic`] --[`satisfy_constraint`] --> `internal_key, new_policy`
     fn extract_key(policy: &Self, unspendable_key: Option<Pk>) -> Result<(Pk, Policy<Pk>), Error> {
         let semantic_policy = policy.lift()?;
         let concrete_keys = policy.keys().into_iter().collect::<HashSet<_>>();
@@ -161,7 +208,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         match (internal_key, unspendable_key) {
             (Some(key), _) => Ok((key.clone(), policy.translate_unsatisfiable_pk(&key))),
             (_, Some(key)) => Ok((key, policy.clone())),
-            _ => Err(errstr("No viable internal key found.")),
+            _ => Err(errstr("No viable internal key found for the TapTree.")),
         }
     }
 
@@ -175,7 +222,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         let (internal_key, policy) = Self::extract_key(self, unspendable_key).unwrap();
         let tree = Descriptor::new_tr(
             internal_key,
-            Some(Self::compile_huffman_taptree(policy).unwrap()), // consume the policy
+            Some(Self::compile_tr_policy::<Ctx>(&policy).unwrap()), // consume the policy
         )
             .unwrap();
         Ok(tree)
@@ -259,7 +306,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             Policy::Hash256(ref h) => Ok(Policy::Hash256(h.clone())),
             Policy::Ripemd160(ref h) => Ok(Policy::Ripemd160(h.clone())),
             Policy::Hash160(ref h) => Ok(Policy::Hash160(h.clone())),
-            Policy::After(n) => Ok(Policy::After(n)),
+            Policy::After(n) => Ok(Policy::After(n)), // TODO: Ask why this works? &self not mut and yet we can move stuff out of it.
             Policy::Older(n) => Ok(Policy::Older(n)),
             Policy::Threshold(k, ref subs) => {
                 let new_subs: Result<Vec<Policy<Q>>, _> = subs
@@ -283,8 +330,8 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
 
     /// Translate `Semantic::Key(key)` to `Semantic::Unsatisfiable` when extracting TapKey
     pub fn translate_unsatisfiable_pk(&self, key: &Pk) -> Policy<Pk> {
-        match self {
-            Policy::Key(k) if *k == *key => Policy::Unsatisfiable,
+        match *self {
+            Policy::Key(ref k) if k.clone() == *key => Policy::Unsatisfiable,
             Policy::And(ref subs) => Policy::And(
                 subs.iter()
                     .map(|sub| sub.translate_unsatisfiable_pk(key))
@@ -296,12 +343,12 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     .collect::<Vec<_>>(),
             ),
             Policy::Threshold(k, ref subs) => Policy::Threshold(
-                *k,
+                k.clone(),
                 subs.iter()
                     .map(|sub| sub.translate_unsatisfiable_pk(key))
                     .collect::<Vec<_>>(),
             ),
-            x => x.clone(),
+            ref x => x.clone(),
         }
     }
 

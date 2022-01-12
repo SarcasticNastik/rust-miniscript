@@ -21,12 +21,12 @@
 //! The format represents EC public keys abstractly to allow wallets to replace
 //! these with BIP32 paths, pay-to-contract instructions, etc.
 //!
-use {error, fmt};
 use descriptor::Descriptor;
-use Error;
 use miniscript::{Miniscript, ScriptContext};
+use Error;
 use MiniscriptKey;
 use Terminal;
+use {error, fmt};
 
 pub use self::concrete::Policy as Concrete;
 /// Semantic policies are "abstract" policies elsewhere; but we
@@ -231,14 +231,14 @@ mod tests {
     use std::str::FromStr;
     use std::sync::Arc;
 
-    use {bitcoin, Descriptor};
-    use {DummyKey, Tap};
     use descriptor::TapTree;
     use policy::concrete;
+    use {bitcoin, Descriptor};
+    use {DummyKey, Tap};
 
     use super::{
-        Concrete,
-        Liftable, Semantic, super::miniscript::{context::Segwitv0, Miniscript},
+        super::miniscript::{context::Segwitv0, Miniscript},
+        Concrete, Liftable, Semantic,
     };
 
     type ConcretePol = Concrete<DummyKey>;
@@ -378,8 +378,7 @@ mod tests {
 
         /// Trivial key extractrion
         {
-            let policy: concrete::Policy<String> =
-                policy_str!("thresh(2,pk(A),pk(A),pk(C),pk(D))");
+            let policy: concrete::Policy<String> = policy_str!("thresh(2,pk(A),pk(A),pk(C),pk(D))");
             let descriptor = policy
                 .compile_tr::<Tap>(Some(unspendable_key.clone()))
                 .unwrap();

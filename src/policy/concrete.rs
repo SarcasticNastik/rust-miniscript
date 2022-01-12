@@ -32,9 +32,13 @@ use miniscript::types::extra_props::TimeLockInfo;
 #[cfg(feature = "compiler")]
 use miniscript::ScriptContext;
 #[cfg(feature = "compiler")]
-use policy::compiler::CompilerError;
+use policy::compiler::{CompilerError, OrdF64};
 #[cfg(feature = "compiler")]
 use policy::{compiler, Semantic};
+#[cfg(feature = "compiler")]
+use std::cmp::Reverse;
+#[cfg(feature = "compiler")]
+use std::collections::BinaryHeap;
 #[cfg(feature = "compiler")]
 use std::sync::Arc;
 #[cfg(feature = "compiler")]
@@ -139,12 +143,77 @@ impl fmt::Display for PolicyError {
 }
 
 impl<Pk: MiniscriptKey> Policy<Pk> {
-    /// Single-Node compilation
+    /// Create a Huffman Tree from compiled [Miniscript] nodes
     #[cfg(feature = "compiler")]
-    fn compile_huffman_taptree(policy: &Self) -> Result<TapTree<Pk>, Error> {
-        let compilation = policy.compile::<Tap>().unwrap();
-        Ok(TapTree::Leaf(Arc::new(compilation)))
+    fn with_huffman_tree<T>(
+        ms: Vec<(OrdF64, Miniscript<Pk, Tap>)>,
+        f: T,
+    ) -> Result<TapTree<Pk>, Error>
+    where
+        T: Fn(OrdF64) -> OrdF64,
+    {
+        // Pattern match terminal Or/ Terminal (with equal odds)
+        let mut node_weights = BinaryHeap::<(Reverse<OrdF64>, Arc<TapTree<Pk>>)>::new();
+        for (prob, script) in ms {
+            node_weights.push((Reverse(f(prob)), Arc::from(TapTree::Leaf(Arc::new(script)))));
+        }
+        if node_weights.is_empty() {
+            return Err(errstr("Empty Miniscript compilation"));
+        }
+        while node_weights.len() > 1 {
+            let (p1, s1) = node_weights.pop().expect("len must atleast be two");
+            let (p2, s2) = node_weights.pop().expect("len must atleast be two");
+
+            let p = (p1.0).0 + (p2.0).0;
+            node_weights.push((Reverse(OrdF64(p)), Arc::from(TapTree::Tree(s1, s2))));
+        }
+
+        debug_assert!(node_weights.len() == 1);
+        let node = node_weights
+            .pop()
+            .expect("huffman tree algorithm is broken")
+            .1;
+        Ok((*node).clone())
     }
+
+    /// Flatten the [`Policy`] tree structure into a Vector with corresponding leaf probability
+    // TODO: 1. Can try to push the maximum of scaling factors and accordingly update later for
+    // TODO: 1. integer metric. (Accordingly change metrics everywhere)
+    #[cfg(feature = "compiler")]
+    fn flatten_policy(&self, prob: f64) -> Vec<(f64, Policy<Pk>)> {
+        match *self {
+            Policy::Or(ref subs) => {
+                let total_odds: usize = subs.iter().map(|(ref k, _)| k).sum();
+                subs.iter()
+                    .map(|(k, ref policy)| {
+                        policy.flatten_policy(prob * *k as f64 / total_odds as f64)
+                    })
+                    .flatten()
+                    .collect::<Vec<_>>()
+            }
+            Policy::Threshold(k, ref subs) if k == 1 => {
+                let total_odds = subs.len();
+                subs.iter()
+                    .map(|policy| policy.flatten_policy(prob / total_odds as f64))
+                    .flatten()
+                    .collect::<Vec<_>>()
+            }
+            ref x => vec![(prob, x.clone())],
+        }
+    }
+
+    /// Compile [`Policy::Or`] and [`Policy::Threshold`] according to odds
+    #[cfg(feature = "compiler")]
+    fn compile_tr_policy(&self) -> Result<TapTree<Pk>, Error> {
+        let leaf_compilations: Vec<_> = self
+            .flatten_policy(1.0)
+            .into_iter()
+            .map(|(prob, ref policy)| (OrdF64(prob), policy.compile::<Tap>().unwrap()))
+            .collect();
+        let taptree = Self::with_huffman_tree(leaf_compilations, |x| x).unwrap();
+        Ok(taptree)
+    }
+
     /// Extract the internal_key from policy tree.
     #[cfg(feature = "compiler")]
     fn extract_key(policy: &Self, unspendable_key: Option<Pk>) -> Result<(Pk, Policy<Pk>), Error> {
@@ -175,11 +244,8 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     #[cfg(feature = "compiler")]
     pub fn compile_tr(&self, unspendable_key: Option<Pk>) -> Result<Descriptor<Pk>, Error> {
         let (internal_key, policy) = Self::extract_key(self, unspendable_key).unwrap();
-        let tree = Descriptor::new_tr(
-            internal_key,
-            Some(Self::compile_huffman_taptree(&policy).unwrap()),
-        )
-        .unwrap();
+        let tree =
+            Descriptor::new_tr(internal_key, Some(policy.compile_tr_policy().unwrap())).unwrap();
         Ok(tree)
     }
 

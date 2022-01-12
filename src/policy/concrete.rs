@@ -16,27 +16,29 @@
 //!
 
 use std::{error, fmt, str};
+use std::cmp::Reverse;
 // use std::cmp::Reverse;
-use std::collections::HashSet;
+use std::collections::{BinaryHeap, HashSet};
+use std::sync::Arc;
 
-use bitcoin::hashes::hex::FromHex;
 use bitcoin::hashes::{hash160, ripemd160, sha256, sha256d};
+use bitcoin::hashes::hex::FromHex;
 
+use {Descriptor, errstr};
+use {Error, ForEach, ForEachKey, MiniscriptKey};
 use descriptor::TapTree;
 use expression::{self, FromTree};
+#[cfg(feature = "compiler")]
+use Miniscript;
 use miniscript::limits::{HEIGHT_TIME_THRESHOLD, SEQUENCE_LOCKTIME_TYPE_FLAG};
-use miniscript::types::extra_props::TimeLockInfo;
 #[cfg(feature = "compiler")]
 use miniscript::ScriptContext;
+use miniscript::types::extra_props::TimeLockInfo;
+use policy::{Liftable, Semantic};
 #[cfg(feature = "compiler")]
 use policy::compiler;
 #[cfg(feature = "compiler")]
 use policy::compiler::CompilerError;
-use policy::{Liftable, Semantic};
-#[cfg(feature = "compiler")]
-use Miniscript;
-use {errstr, Descriptor};
-use {Error, ForEach, ForEachKey, MiniscriptKey};
 
 use super::ENTAILMENT_MAX_TERMINALS;
 
@@ -136,20 +138,44 @@ impl fmt::Display for PolicyError {
 }
 
 impl<Pk: MiniscriptKey> Policy<Pk> {
-    /// Create a Huffman Tree from compiled Miniscript nodes
+    /// Create a Huffman Tree from compiled [Miniscript] nodes
     fn with_huffman_tree<T, Ctx>(
-        policy: Vec<(f64, Miniscript<Pk, Ctx>)>,
+        ms: Vec<(f64, Miniscript<Pk, Ctx>)>,
         f: T,
     ) -> Result<TapTree<Pk>, Error>
         where
-            T: Fn(&u32) -> u32,
+            T: Fn(f64) -> f64,
             Ctx: ScriptContext,
     {
         // Pattern match terminal Or/ Terminal (with equal odds)
-        todo!()
+        let mut node_weights = BinaryHeap::<(Reverse<f64>, Arc<TapTree<Pk>>)>::new();
+        for (prob, script) in ms {
+            node_weights.push((Reverse(f(prob as f64)), Arc::from(TapTree::<Pk>::Leaf(Arc::new(script)))));
+        }
+        if node_weights.is_empty() {
+            // FIXME: Error message
+            return Err(errstr("Empty Miniscript compilation"));
+        }
+        while node_weights.len() > 1 {
+            let (p1, s1) = node_weights.pop().expect("len must atleast be two");
+            let (p2, s2) = node_weights.pop().expect("len must atleast be two");
+
+            let p = Reverse(p1.0.saturating_add(p2.0));
+            node_weights.push((p, Arc::from(TapTree::Tree(s1, s2))));
+        }
+
+        debug_assert!(node_weights.len() == 1);
+        let node = node_weights
+            .pop()
+            .expect("huffman tree algorithm is broken")
+            .1;
+        Ok(*node)
     }
 
     /// Flatten the [`Policy`] tree structure into a Vector with corresponding leaf probability
+    // TDOO: 1. Can try to push the maximum of scaling factors and accordingly update later for
+    // TODO:    integer metric. (Accordingly change metrics everywhere)
+    // FIXME: 1. Use `Ord(f64)`
     fn flatten_policy<Ctx: ScriptContext>(&self, prob: f64) -> Vec<(f64, Policy<Pk>)> {
         match *self {
             Policy::Or(ref subs) => {
@@ -174,6 +200,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
 
     /// Compile [`Policy::Or`] and [`Policy::Threshold`] according to odds
     fn compile_tr_policy<Ctx: ScriptContext>(&self) -> Result<TapTree<Pk>, Error> {
+        //FIXME: Is this really required?
         if !Ctx::is_tap() {
             return Err(errstr("Taproot script should compile with `Tap` context"));
         }
@@ -183,7 +210,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             .into_iter()
             .map(|(prob, ref policy)| (prob, policy.compile::<Ctx>().unwrap()))
             .collect();
-        let taptree = Self::with_huffman_tree::<_, Ctx>(leaf_compilations, |x| *x).unwrap();
+        let taptree = Self::with_huffman_tree::<_, Ctx>(leaf_compilations, |x| x).unwrap();
         Ok(taptree)
     }
 
@@ -206,7 +233,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         }
 
         match (internal_key, unspendable_key) {
-            (Some(key), _) => Ok((key.clone(), policy.translate_unsatisfiable_pk(&key))),
+            (Some(ref key), _) => Ok((key.clone(), policy.translate_unsatisfiable_pk(key))),
             (_, Some(key)) => Ok((key, policy.clone())),
             _ => Err(errstr("No viable internal key found for the TapTree.")),
         }

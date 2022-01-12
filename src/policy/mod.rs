@@ -21,12 +21,12 @@
 //! The format represents EC public keys abstractly to allow wallets to replace
 //! these with BIP32 paths, pay-to-contract instructions, etc.
 //!
-use {error, fmt};
 use descriptor::Descriptor;
-use Error;
 use miniscript::{Miniscript, ScriptContext};
+use Error;
 use MiniscriptKey;
 use Terminal;
+use {error, fmt};
 
 pub use self::concrete::Policy as Concrete;
 /// Semantic policies are "abstract" policies elsewhere; but we
@@ -231,14 +231,14 @@ mod tests {
     use std::str::FromStr;
     use std::sync::Arc;
 
-    use {bitcoin, Descriptor};
-    use {DummyKey, Tap};
     use descriptor::TapTree;
     use policy::concrete;
+    use {bitcoin, Descriptor};
+    use {DummyKey, Tap};
 
     use super::{
-        Concrete,
-        Liftable, Semantic, super::miniscript::{context::Segwitv0, Miniscript},
+        super::miniscript::{context::Segwitv0, Miniscript},
+        Concrete, Liftable, Semantic,
     };
 
     type ConcretePol = Concrete<DummyKey>;
@@ -376,12 +376,10 @@ mod tests {
     fn single_leaf_tr_compile() {
         let unspendable_key: String = "UNSPENDABLE".to_string();
 
-        /// Trivial key extractrion
         {
-            let policy: concrete::Policy<String> =
-                policy_str!("thresh(2,pk(A),pk(A),pk(C),pk(D))");
+            let policy: concrete::Policy<String> = policy_str!("thresh(2,pk(A),pk(A),pk(C),pk(D))");
             let descriptor = policy
-                .compile_tr::<Tap>(Some(unspendable_key.clone()))
+                .compile_tr(Some(unspendable_key.clone()))
                 .unwrap();
 
             let ms_compilation: Miniscript<String, Tap> = ms_str!("multi_a(2,C,D)");
@@ -389,20 +387,5 @@ mod tests {
             let expected_descriptor = Descriptor::new_tr("A".to_string(), Some(tree)).unwrap();
             assert_eq!(descriptor, expected_descriptor);
         }
-
-        // // Very non-trivial key extraction
-        // {
-        //     // Replacement with Unsatisfiable causes issues with compilation of policy
-        //     let policy: concrete::Policy<String> =
-        //         policy_str!("thresh(2,pk(A),thresh(2,pk(C),pk(A),or(pk(A),pk(D))),and(pk(E),pk(F)))");
-        //     let descriptor = policy
-        //         .compile_tr::<Tap>(Some(unspendable_key.clone()))
-        //         .unwrap();
-        //
-        //     let ms_compilation: Miniscript<String, Tap> = ms_str!("multi_a(2,multi_a(2,C,D),and(E,F))");
-        //     let tree: TapTree<String> = TapTree::Leaf(Arc::new(ms_compilation));
-        //     let expected_descriptor = Descriptor::new_tr("A".to_string(), Some(tree)).unwrap();
-        //     assert_eq!(descriptor, expected_descriptor);
-        // }
     }
 }

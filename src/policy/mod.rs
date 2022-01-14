@@ -380,7 +380,7 @@ mod tests {
         {
             let policy: concrete::Policy<String> = policy_str!("thresh(2,pk(A),pk(A),pk(C),pk(D))");
             let descriptor = policy
-                .compile_tr::<Tap>(Some(unspendable_key.clone()))
+                .compile_tr(Some(unspendable_key.clone()))
                 .unwrap();
 
             let ms_compilation: Miniscript<String, Tap> = ms_str!("multi_a(2,C,D)");
@@ -388,20 +388,5 @@ mod tests {
             let expected_descriptor = Descriptor::new_tr("A".to_string(), Some(tree)).unwrap();
             assert_eq!(descriptor, expected_descriptor);
         }
-
-        // // Very non-trivial key extraction
-        // {
-        //     // Replacement with Unsatisfiable causes issues with compilation of policy
-        //     let policy: concrete::Policy<String> =
-        //         policy_str!("thresh(2,pk(A),thresh(2,pk(C),pk(A),or(pk(A),pk(D))),and(pk(E),pk(F)))");
-        //     let descriptor = policy
-        //         .compile_tr::<Tap>(Some(unspendable_key.clone()))
-        //         .unwrap();
-        //
-        //     let ms_compilation: Miniscript<String, Tap> = ms_str!("multi_a(2,multi_a(2,C,D),and(E,F))");
-        //     let tree: TapTree<String> = TapTree::Leaf(Arc::new(ms_compilation));
-        //     let expected_descriptor = Descriptor::new_tr("A".to_string(), Some(tree)).unwrap();
-        //     assert_eq!(descriptor, expected_descriptor);
-        // }
     }
 }

@@ -17,7 +17,6 @@
 
 use std::{error, fmt, str};
 use std::cmp::Reverse;
-// use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashSet};
 use std::sync::Arc;
 
@@ -38,7 +37,8 @@ use policy::{Liftable, Semantic};
 #[cfg(feature = "compiler")]
 use policy::compiler;
 #[cfg(feature = "compiler")]
-use policy::compiler::CompilerError;
+use policy::compiler::{CompilerError, OrdF64};
+use Tap;
 
 use super::ENTAILMENT_MAX_TERMINALS;
 
@@ -139,29 +139,27 @@ impl fmt::Display for PolicyError {
 
 impl<Pk: MiniscriptKey> Policy<Pk> {
     /// Create a Huffman Tree from compiled [Miniscript] nodes
-    fn with_huffman_tree<T, Ctx>(
-        ms: Vec<(f64, Miniscript<Pk, Ctx>)>,
-        f: T,
-    ) -> Result<TapTree<Pk>, Error>
+    fn with_huffman_tree<T>(ms: Vec<(OrdF64, Miniscript<Pk, Tap>)>, f: T) -> Result<TapTree<Pk>, Error>
         where
-            T: Fn(f64) -> f64,
-            Ctx: ScriptContext,
+            T: Fn(OrdF64) -> OrdF64,
     {
         // Pattern match terminal Or/ Terminal (with equal odds)
-        let mut node_weights = BinaryHeap::<(Reverse<f64>, Arc<TapTree<Pk>>)>::new();
+        let mut node_weights = BinaryHeap::<(Reverse<OrdF64>, Arc<TapTree<Pk>>)>::new();
         for (prob, script) in ms {
-            node_weights.push((Reverse(f(prob as f64)), Arc::from(TapTree::<Pk>::Leaf(Arc::new(script)))));
+            node_weights.push((
+                Reverse(f(prob)),
+                Arc::from(TapTree::<Pk>::Leaf(Arc::new(script))),
+            ));
         }
         if node_weights.is_empty() {
-            // FIXME: Error message
             return Err(errstr("Empty Miniscript compilation"));
         }
         while node_weights.len() > 1 {
             let (p1, s1) = node_weights.pop().expect("len must atleast be two");
             let (p2, s2) = node_weights.pop().expect("len must atleast be two");
 
-            let p = Reverse(p1.0.saturating_add(p2.0));
-            node_weights.push((p, Arc::from(TapTree::Tree(s1, s2))));
+            let p = p1.0.0 + p2.0.0;
+            node_weights.push((Reverse(OrdF64(p)), Arc::from(TapTree::Tree(s1, s2))));
         }
 
         debug_assert!(node_weights.len() == 1);
@@ -169,20 +167,19 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             .pop()
             .expect("huffman tree algorithm is broken")
             .1;
-        Ok(*node)
+        Ok((*node).clone())
     }
 
     /// Flatten the [`Policy`] tree structure into a Vector with corresponding leaf probability
     // TDOO: 1. Can try to push the maximum of scaling factors and accordingly update later for
-    // TODO:    integer metric. (Accordingly change metrics everywhere)
-    // FIXME: 1. Use `Ord(f64)`
-    fn flatten_policy<Ctx: ScriptContext>(&self, prob: f64) -> Vec<(f64, Policy<Pk>)> {
+    // TODO: 1. integer metric. (Accordingly change metrics everywhere)
+    fn flatten_policy(&self, prob: f64) -> Vec<(f64, Policy<Pk>)> {
         match *self {
             Policy::Or(ref subs) => {
                 let total_odds: usize = subs.iter().map(|(ref k, _)| k).sum();
                 subs.iter()
                     .map(|(k, ref policy)| {
-                        policy.flatten_policy::<Ctx>(prob * *k as f64 / total_odds as f64)
+                        policy.flatten_policy(prob * *k as f64 / total_odds as f64)
                     })
                     .flatten()
                     .collect::<Vec<_>>()
@@ -190,7 +187,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             Policy::Threshold(k, ref subs) if k == 1 => {
                 let total_odds = subs.len();
                 subs.iter()
-                    .map(|policy| policy.flatten_policy::<Ctx>(prob / total_odds as f64))
+                    .map(|policy| policy.flatten_policy(prob / total_odds as f64))
                     .flatten()
                     .collect::<Vec<_>>()
             }
@@ -199,18 +196,13 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     }
 
     /// Compile [`Policy::Or`] and [`Policy::Threshold`] according to odds
-    fn compile_tr_policy<Ctx: ScriptContext>(&self) -> Result<TapTree<Pk>, Error> {
-        //FIXME: Is this really required?
-        if !Ctx::is_tap() {
-            return Err(errstr("Taproot script should compile with `Tap` context"));
-        }
-
+    fn compile_tr_policy(&self) -> Result<TapTree<Pk>, Error> {
         let leaf_compilations: Vec<_> = self
-            .flatten_policy::<Ctx>(1.0)
+            .flatten_policy(1.0)
             .into_iter()
-            .map(|(prob, ref policy)| (prob, policy.compile::<Ctx>().unwrap()))
+            .map(|(prob, ref policy)| (OrdF64(prob), policy.compile::<Tap>().unwrap()))
             .collect();
-        let taptree = Self::with_huffman_tree::<_, Ctx>(leaf_compilations, |x| x).unwrap();
+        let taptree = Self::with_huffman_tree(leaf_compilations, |x| x).unwrap();
         Ok(taptree)
     }
 
@@ -240,18 +232,13 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     }
 
     /// Compile the [`Tr`] descriptor into optimized [`TapTree`] implementation
-    // TODO: We might require other compile errors for Taproot. Will discuss and update.
     #[cfg(feature = "compiler")]
-    pub fn compile_tr<Ctx: ScriptContext>(
-        &self,
-        unspendable_key: Option<Pk>,
-    ) -> Result<Descriptor<Pk>, Error> {
+    pub fn compile_tr(&self, unspendable_key: Option<Pk>) -> Result<Descriptor<Pk>, Error> {
         let (internal_key, policy) = Self::extract_key(self, unspendable_key).unwrap();
         let tree = Descriptor::new_tr(
             internal_key,
-            Some(Self::compile_tr_policy::<Ctx>(&policy).unwrap()), // consume the policy
-        )
-            .unwrap();
+            Some(policy.compile_tr_policy().unwrap()), // consume the policy
+        ).unwrap();
         Ok(tree)
     }
 
@@ -333,7 +320,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             Policy::Hash256(ref h) => Ok(Policy::Hash256(h.clone())),
             Policy::Ripemd160(ref h) => Ok(Policy::Ripemd160(h.clone())),
             Policy::Hash160(ref h) => Ok(Policy::Hash160(h.clone())),
-            Policy::After(n) => Ok(Policy::After(n)), // TODO: Ask why this works? &self not mut and yet we can move stuff out of it.
+            Policy::After(n) => Ok(Policy::After(n)),
             Policy::Older(n) => Ok(Policy::Older(n)),
             Policy::Threshold(k, ref subs) => {
                 let new_subs: Result<Vec<Policy<Q>>, _> = subs

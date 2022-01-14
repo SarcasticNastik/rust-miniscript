@@ -37,7 +37,7 @@ type PolicyCache<Pk, Ctx> =
 
 ///Ordered f64 for comparison
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
-struct OrdF64(f64);
+pub struct OrdF64(pub f64);
 
 impl Eq for OrdF64 {}
 impl Ord for OrdF64 {

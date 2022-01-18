@@ -997,7 +997,16 @@ where
 
             match Ctx::sig_type() {
                 SigType::Schnorr => {
-                    insert_wrap!(AstElemExt::terminal(Terminal::MultiA(k, key_vec)))
+                    if key_vec.len() == subs.len() {
+                        insert_wrap!(AstElemExt::terminal(Terminal::MultiA(k, key_vec)))
+                    } else if k == subs.len() {
+                        let mut policy = subs.first().expect("No sub policy in thresh() ?").clone();
+                        for sub in &subs[1..] {
+                            policy = Concrete::And(vec![sub.clone(), policy]);
+                        }
+
+                        ret = best_compilations(policy_cache, &policy, sat_prob, dissat_prob)?;
+                    }
                 }
                 _ => {
                     if key_vec.len() == subs.len() && subs.len() <= MAX_PUBKEYS_PER_MULTISIG {

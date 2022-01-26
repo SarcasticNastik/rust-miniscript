@@ -32,11 +32,16 @@ use {
     policy::compiler::{CompilerError, OrdF64},
     policy::{compiler, Liftable, Semantic},
     std::cmp::Reverse,
+    std::collections::BTreeMap,
     std::collections::BinaryHeap,
     std::sync::Arc,
     Descriptor, Miniscript, Tap,
 };
 use {Error, ForEach, ForEachKey, MiniscriptKey};
+
+// Change to Arc<TapTree<Pk>>
+#[cfg(feature = "compiler")]
+type PolicyTapCache<Pk> = BTreeMap<TapTree<Pk>, (Policy<Pk>, f64)>;
 
 /// Concrete policy which corresponds directly to a Miniscript structure,
 /// and whose disjunctions are annotated with satisfaction probabilities
@@ -168,6 +173,88 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         Ok(node)
     }
 
+    /// Taproot Tree cost (with `branch_prob`)
+    #[cfg(feature = "compiler")]
+    fn tr_node_cost(ms: &Miniscript<Pk, Tap>, prob: f64, cost: &f64) -> OrdF64 {
+        OrdF64(ms.script_size() as f64 + prob * cost)
+    }
+
+    #[cfg(feature = "compiler")]
+    fn with_huffman_tree_eff(
+        ms: Vec<(OrdF64, (Miniscript<Pk, Tap>, f64))>,
+        policy_cache: &mut PolicyTapCache<Pk>,
+    ) -> Result<TapTree<Pk>, Error> {
+        let mut node_weights = BinaryHeap::<(Reverse<OrdF64>, OrdF64, TapTree<Pk>)>::new(); // (cost, branch_prob, tree)
+        for (prob, script) in ms {
+            let wt = Self::tr_node_cost(&script.0, prob.0, &script.1);
+            node_weights.push((Reverse(wt), prob, TapTree::Leaf(Arc::new(script.0))));
+        }
+        if node_weights.is_empty() {
+            return Err(errstr("Empty Miniscript compilation"));
+        }
+        while node_weights.len() > 1 {
+            let (prev_cost1, p1, s1) = node_weights.pop().expect("len must atleast be two");
+            let (prev_cost2, p2, s2) = node_weights.pop().expect("len must atleast be two");
+
+            match (s1, s2) {
+                (TapTree::Leaf(ms1), TapTree::Leaf(ms2)) => {
+                    // Retrieve the respective policies
+                    let (left_pol, _c1) = policy_cache
+                        .get(&TapTree::Leaf(ms1.clone()))
+                        .ok_or_else(|| errstr("No corresponding policy found"))?;
+
+                    let (right_pol, _c2) = policy_cache
+                        .get(&TapTree::Leaf(ms2.clone()))
+                        .ok_or_else(|| errstr("No corresponding policy found"))?;
+
+                    let parent_policy = Policy::Or(vec![
+                        ((p1.0 * 1e4).round() as usize, left_pol.clone()),
+                        ((p2.0 * 1e4).round() as usize, right_pol.clone()),
+                    ]);
+
+                    let (parent_compilation, cost) =
+                        compiler::tr_best_compilation::<Pk, Tap>(&parent_policy)?;
+
+                    let parent_cost = Self::tr_node_cost(&parent_compilation, p1.0 + p2.0, &cost);
+                    let children_cost = OrdF64((prev_cost1.0).0 + (prev_cost2.0).0 + 32.); // 32. * (p1/(p1+p2) + p2/(p1+p2)) -> extra cost due to increase in node
+
+                    policy_cache.remove(&TapTree::Leaf(ms1.clone()));
+                    policy_cache.remove(&TapTree::Leaf(ms2.clone()));
+                    let p = p1.0 + p2.0;
+                    node_weights.push(if parent_cost > children_cost {
+                        (
+                            Reverse(children_cost),
+                            OrdF64(p),
+                            TapTree::Tree(
+                                Arc::from(TapTree::Leaf(ms1)),
+                                Arc::from(TapTree::Leaf(ms2)),
+                            ),
+                        )
+                    } else {
+                        let node = TapTree::Leaf(Arc::from(parent_compilation));
+                        policy_cache.insert(node.clone(), (parent_policy, parent_cost.0));
+                        (Reverse(parent_cost), OrdF64(p), node)
+                    });
+                }
+                (ms1, ms2) => {
+                    let p = p1.0 + p2.0;
+                    let cost = OrdF64((prev_cost1.0).0 + (prev_cost2.0).0 + 32.0);
+                    node_weights.push((
+                        Reverse(cost),
+                        OrdF64(p),
+                        TapTree::Tree(Arc::from(ms1), Arc::from(ms2)),
+                    ));
+                }
+            }
+        }
+        debug_assert!(node_weights.len() == 1);
+        let node = node_weights
+            .pop()
+            .expect("huffman tree algorithm is broken")
+            .2;
+        Ok(node)
+    }
+
     /// Flatten the [`Policy`] tree structure into a Vector with corresponding leaf probability
     // TODO: 1. Can try to push the maximum of scaling factors and accordingly update later for
     // TODO: 1. integer metric. (Accordingly change metrics everywhere)
@@ -196,7 +283,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
 
     /// Compile [`Policy::Or`] and [`Policy::Threshold`] according to odds
     #[cfg(feature = "compiler")]
-    fn compile_tr_policy(&self) -> Result<TapTree<Pk>, Error> {
+    fn compile_tr_private(&self) -> Result<TapTree<Pk>, Error> {
         let leaf_compilations: Vec<_> = self
             .to_tapleaf_prob_vec(1.0)
             .into_iter()
@@ -204,6 +291,26 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             .map(|(prob, ref policy)| (OrdF64(prob), compiler::best_compilation(policy).unwrap()))
             .collect();
         let taptree = Self::with_huffman_tree(leaf_compilations, |x| x).unwrap();
+        Ok(taptree)
+    }
+
+    #[cfg(feature = "compiler")]
+    fn compile_tr_efficient(&self) -> Result<TapTree<Pk>, Error> {
+        let mut policy_cache = PolicyTapCache::<Pk>::new();
+        let leaf_compilations: Vec<_> = self
+            .to_tapleaf_prob_vec(1.0)
+            .into_iter()
+            .filter(|x| x.1 != Policy::Unsatisfiable)
+            .map(|(prob, ref policy)| {
+                let compilation = compiler::tr_best_compilation::<Pk, Tap>(policy).unwrap();
+                policy_cache.insert(
+                    TapTree::Leaf(Arc::from(compilation.0.clone())),
+                    (policy.clone(), compilation.1), // (policy, sat_cost)
+                );
+                (OrdF64(prob), compilation) // (branch_prob, comp=(ms, sat_cost))
+            })
+            .collect();
+        let taptree = Self::with_huffman_tree_eff(leaf_compilations, &mut policy_cache).unwrap();
         Ok(taptree)
     }
 
@@ -236,7 +343,11 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// Compile the [`Tr`] descriptor into optimized [`TapTree`] implementation
     // TODO: We might require other compile errors for Taproot. Will discuss and update.
     #[cfg(feature = "compiler")]
-    pub fn compile_tr(&self, unspendable_key: Option<Pk>) -> Result<Descriptor<Pk>, Error> {
+    pub fn compile_tr(
+        &self,
+        unspendable_key: Option<Pk>,
+        eff: bool,
+    ) -> Result<Descriptor<Pk>, Error> {
         self.is_valid()?; // Check for validity
         match self.is_safe_nonmalleable() {
             (false, _) => Err(Error::from(CompilerError::TopLevelNonSafe)),
@@ -249,7 +360,13 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     internal_key,
                     match policy {
                         Policy::Trivial => None,
-                        policy => Some(policy.compile_tr_policy()?),
+                        policy => {
+                            if eff {
+                                Some(policy.compile_tr_efficient()?)
+                            } else {
+                                Some(policy.compile_tr_private()?)
+                            }
+                        }
                     },
                 )?;
                 Ok(tree)

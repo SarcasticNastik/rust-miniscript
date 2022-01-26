@@ -196,7 +196,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
 
     /// Compile [`Policy::Or`] and [`Policy::Threshold`] according to odds
     #[cfg(feature = "compiler")]
-    fn compile_tr_policy(&self) -> Result<TapTree<Pk>, Error> {
+    fn compile_tr_private(&self) -> Result<TapTree<Pk>, Error> {
         let leaf_compilations: Vec<_> = self
             .to_tapleaf_prob_vec(1.0)
             .into_iter()
@@ -204,6 +204,14 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             .collect();
         let taptree = Self::with_huffman_tree(leaf_compilations, |x| x).unwrap();
         Ok(taptree)
+    }
+
+    #[cfg(feature = "compiler")]
+    fn compile_tr_efficient(&self) -> Result<TapTree<Pk>, Error> {
+        // TODO: 1. Get AstElemExt to retrieve policy odds
+        // TODO: 2. Compile either into a Miniscript or TapRoot node depending on the resulting compilation:
+        // TODO:    - Ver1: Brute force through compilation to get an idea of what's happening
+        todo!()
     }
 
     /// Extract the internal_key from policy tree.
@@ -248,7 +256,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     internal_key,
                     match policy {
                         Policy::Trivial => None,
-                        policy => Some(policy.compile_tr_policy()?),
+                        policy => Some(policy.compile_tr_private()?),
                     },
                 )?;
                 Ok(tree)

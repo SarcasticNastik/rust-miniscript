@@ -206,8 +206,21 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         Ok(taptree)
     }
 
+     fn best_split_tr_node(&self) -> Result<Miniscript<Pk, Tap>, Error> {
+         match *self {
+             Policy::Or(ref subs) => {
+                 todo!()
+             }
+             Policy::Threshold(k, ref subs) if k == 1 => {
+                 todo!()
+             }
+             x => Ok(x.compile::<Tap>().unwrap()),
+         }
+     }
+
     #[cfg(feature = "compiler")]
     fn compile_tr_efficient(&self) -> Result<TapTree<Pk>, Error> {
+        // TODO: Use AstElemExt::cost_1d() for policy values
         // TODO: 1. Get AstElemExt to retrieve policy odds
         // TODO: 2. Compile either into a Miniscript or TapRoot node depending on the resulting compilation:
         // TODO:    - Ver1: Brute force through compilation to get an idea of what's happening
@@ -257,6 +270,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     match policy {
                         Policy::Trivial => None,
                         policy => Some(policy.compile_tr_private()?),
+                        // policy => Some(policy.compile_tr_efficient()?),
                     },
                 )?;
                 Ok(tree)

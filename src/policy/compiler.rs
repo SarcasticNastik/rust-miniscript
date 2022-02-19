@@ -1117,19 +1117,21 @@ pub fn best_compilation<Pk: MiniscriptKey, Ctx: ScriptContext>(
     }
 }
 
-
 /// Obtain the best compilation of for p=1.0 and q=0
 pub fn tr_best_compilation<Pk: MiniscriptKey, Ctx: ScriptContext>(
     policy: &Concrete<Pk>,
-) -> Result<(Miniscript<Pk, Ctx>,Option<f64>), CompilerError> {
+) -> Result<(Miniscript<Pk, Ctx>, f64), CompilerError> {
     let mut policy_cache = PolicyCache::<Pk, Ctx>::new();
-    let x: AstElemExt<Pk, Ctx> = &*best_t(&mut policy_cache, policy, 1.0, None)?;
-    if !x.ty.mall.safe {
+    let x: AstElemExt<Pk, Ctx> = best_t(&mut policy_cache, policy, 1.0, None)?;
+    if !x.ms.ty.mall.safe {
         Err(CompilerError::TopLevelNonSafe)
-    } else if !x.ty.mall.non_malleable {
+    } else if !x.ms.ty.mall.non_malleable {
         Err(CompilerError::ImpossibleNonMalleableCompilation)
     } else {
-        Ok((*(x.ms).clone(), x.comp_ext_data.branch_prob))
+        match x.comp_ext_data.branch_prob {
+            Some(prob) => Ok(((*x.ms).clone(), prob * x.comp_ext_data.sat_cost)),
+            None => Err(CompilerError::ImpossibleNonMalleableCompilation), // Change the above compilation error
+        }
     }
 }
 /// Obtain the best B expression with given sat and dissat

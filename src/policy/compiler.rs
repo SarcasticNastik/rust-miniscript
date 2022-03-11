@@ -1128,10 +1128,11 @@ pub fn tr_best_compilation<Pk: MiniscriptKey, Ctx: ScriptContext>(
     } else if !x.ms.ty.mall.non_malleable {
         Err(CompilerError::ImpossibleNonMalleableCompilation)
     } else {
-        match x.comp_ext_data.branch_prob {
-            Some(prob) => Ok(((*x.ms).clone(), prob * x.comp_ext_data.sat_cost)),
-            None => Err(CompilerError::ImpossibleNonMalleableCompilation), // Change the above compilation error
-        }
+        // match x.comp_ext_data.branch_prob {
+        //     Some(prob) => Ok(((*x.ms).clone(), x.comp_ext_data.sat_cost)),
+        //     None => Err(CompilerError::ImpossibleNonMalleableCompilation), // Change the above compilation error
+        // }
+        Ok(((*x.ms).clone(), x.comp_ext_data.sat_cost))
     }
 }
 /// Obtain the best B expression with given sat and dissat

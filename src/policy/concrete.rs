@@ -39,6 +39,7 @@ use {
 };
 use {Error, ForEach, ForEachKey, MiniscriptKey};
 
+// Change to Arc<TapTree<Pk>>
 type PolicyTapCache<Pk> = BTreeMap<TapTree<Pk>, (Policy<Pk>, f64)>;
 
 /// Concrete policy which corresponds directly to a Miniscript structure,
@@ -182,7 +183,8 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     ) -> Result<TapTree<Pk>, Error> {
         let mut node_weights = BinaryHeap::<(Reverse<OrdF64>, TapTree<Pk>)>::new();
         for (prob, script) in ms {
-            let wt = OrdF64(script.0.script_size() as f64 + prob.0 * script.1);
+            // let wt = OrdF64(script.0.script_size() as f64 + prob.0 * script.1);
+            let wt = Self::tr_node_cost(&script.0, prob.0, &script.1);
             node_weights.push((Reverse(wt), TapTree::Leaf(Arc::new(script.0))));
         }
         if node_weights.is_empty() {
@@ -192,42 +194,55 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             let (p1, s1) = node_weights.pop().expect("len must atleast be two");
             let (p2, s2) = node_weights.pop().expect("len must atleast be two");
 
-            // Retrieve the respective policies
-            let (left_pol, c1) = policy_cache
-                .get(&s1)
-                .ok_or(errstr("No corresponding policy found"))?;
-            let (right_pol, c2) = policy_cache
-                .get(&s2)
-                .ok_or(errstr("No corresponding policy found"))?;
+            match (s1, s2) {
+                (TapTree::Leaf(ms1), TapTree::Leaf(ms2)) => {
+                    // Retrieve the respective policies
+                    let (left_pol, c1) = policy_cache
+                        .get(&TapTree::Leaf(ms1.clone()))
+                        .ok_or_else(|| errstr("No corresponding policy found"))?;
 
-            // Create the parent, check if those match
-            // Use p1 and p2 to find approximate odds
-            let parent_policy =
-                Policy::<Pk>::Or(vec![(1, left_pol.clone()), (1, right_pol.clone())]); // Convert 1 to respective odds
-            let (parent_comp, cost) = tr_best_compilation::<Pk, Tap>(&parent_policy)?;
+                    let (right_pol, c2) = policy_cache
+                        .get(&TapTree::Leaf(ms2.clone()))
+                        .ok_or_else(|| errstr("No corresponding policy found"))?;
 
-            let parent_cost = Self::tr_node_cost(&parent_comp, (p1.0).0 + (p2.0).0, &cost);
-            let children_cost = OrdF64(
-                match &s1 {
-                    TapTree::Leaf(script) => Self::tr_node_cost(script.as_ref(), (p1.0).0, c1).0,
-                    _ => 0.,
-                } + match &s2 {
-                    TapTree::Leaf(script) => Self::tr_node_cost(script.as_ref(), (p2.0).0, c2).0,
-                    _ => 0.,
-                },
-            );
+                    // Find float_to_integer ratio
+                    // https://stackoverflow.com/questions/56821119/converting-floating-ratios-to-int
+                    let parent_policy =
+                        Policy::<Pk>::Or(vec![(1, left_pol.clone()), (1, right_pol.clone())]);
+                    let (parent_comp, cost) = tr_best_compilation::<Pk, Tap>(&parent_policy)?;
 
-            let p = (p1.0).0 + (p2.0).0;
-            node_weights.push((
-                Reverse(OrdF64(p)),
-                if parent_cost < children_cost {
-                    TapTree::Tree(Arc::from(s1), Arc::from(s2))
-                } else {
-                    TapTree::Leaf(Arc::from(parent_comp))
-                },
-            ));
+                    let parent_cost = Self::tr_node_cost(&parent_comp, (p1.0).0 + (p2.0).0, &cost);
+                    let children_cost = OrdF64(
+                        Self::tr_node_cost(&*ms1, (p1.0).0, c1).0
+                            + Self::tr_node_cost(&*ms2, (p2.0).0, c2).0,
+                    );
+
+                    policy_cache.remove(&TapTree::Leaf(ms1.clone()));
+                    policy_cache.remove(&TapTree::Leaf(ms2.clone()));
+                    let p = (p1.0).0 + (p2.0).0;
+                    node_weights.push((
+                        Reverse(OrdF64(p)),
+                        if parent_cost > children_cost {
+                            TapTree::Tree(
+                                Arc::from(TapTree::Leaf(ms1)),
+                                Arc::from(TapTree::Leaf(ms2)),
+                            )
+                        } else {
+                            let node = TapTree::Leaf(Arc::from(parent_comp));
+                            policy_cache.insert(node.clone(), (parent_policy, p));
+                            node
+                        },
+                    ));
+                }
+                (ms1, ms2) => {
+                    let p = (p1.0).0 + (p2.0).0;
+                    node_weights.push((
+                        Reverse(OrdF64(p)),
+                        TapTree::Tree(Arc::from(ms1), Arc::from(ms2)),
+                    ));
+                }
+            }
         }
-
         debug_assert!(node_weights.len() == 1);
         let node = node_weights
             .pop()
@@ -322,7 +337,11 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// Compile the [`Tr`] descriptor into optimized [`TapTree`] implementation
     // TODO: We might require other compile errors for Taproot. Will discuss and update.
     #[cfg(feature = "compiler")]
-    pub fn compile_tr(&self, unspendable_key: Option<Pk>) -> Result<Descriptor<Pk>, Error> {
+    pub fn compile_tr(
+        &self,
+        unspendable_key: Option<Pk>,
+        eff: bool,
+    ) -> Result<Descriptor<Pk>, Error> {
         self.is_valid()?; // Check for validity
         match self.is_safe_nonmalleable() {
             (false, _) => Err(Error::from(CompilerError::TopLevelNonSafe)),
@@ -335,8 +354,14 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     internal_key,
                     match policy {
                         Policy::Trivial => None,
-                        policy => Some(policy.compile_tr_private()?),
-                        // policy => Some(policy.compile_tr_efficient()?),
+                        // policy => Some(policy.compile_tr_private()?),
+                        policy => {
+                            if eff {
+                                Some(policy.compile_tr_efficient()?)
+                            } else {
+                                Some(policy.compile_tr_private()?)
+                            }
+                        }
                     },
                 )?;
                 Ok(tree)

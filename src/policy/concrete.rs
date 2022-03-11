@@ -164,7 +164,6 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                 TapTree::Tree(Arc::from(s1), Arc::from(s2)),
             ));
         }
-
         debug_assert!(node_weights.len() == 1);
         let node = node_weights
             .pop()
@@ -176,7 +175,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// Taproot Tree cost (with `branch_prob`)
     #[cfg(feature = "compiler")]
     fn tr_node_cost(ms: &Miniscript<Pk, Tap>, prob: f64, cost: &f64) -> OrdF64 {
-        OrdF64(ms.script_size() as f64 + prob * cost)
+        OrdF64(prob * (ms.script_size() as f64 + cost))
     }
 
     #[cfg(feature = "compiler")]

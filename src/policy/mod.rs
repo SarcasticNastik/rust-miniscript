@@ -435,7 +435,9 @@ mod tests {
                 "pk(N)",
             ];
 
-            let node_probabilities: [f64; 7] = [0.12, 0.28, 0.08, 0.12, 0.2, 0.18, 0.02];
+            // Floating-point precision errors cause the minor errors
+            let node_probabilities: [f64; 7] =
+                [0.12000002, 0.28, 0.08, 0.12, 0.19, 0.18999998, 0.02];
 
             let policy: Concrete<String> = policy_str!(
                 "{}",
@@ -450,6 +452,9 @@ mod tests {
                     node_policies[6]
                 )
             );
+            let descriptor = policy
+                .compile_tr(Some(unspendable_key.clone()), false)
+                .unwrap();
 
             let mut sorted_policy_prob = node_policies
                 .into_iter()
@@ -462,46 +467,33 @@ mod tests {
                 .collect::<Vec<_>>();
 
             // Generate TapTree leaves compilations from the given sub-policies
-            let mut node_compilations = sorted_policies
+            let node_compilations = sorted_policies
                 .into_iter()
                 .map(|x| {
-                    let leaf_policy: Concrete<String> = policy_str!("{}", &format!("{}", x));
+                    let leaf_policy: Concrete<String> = policy_str!("{}", x);
                     TapTree::Leaf(Arc::from(leaf_policy.compile::<Tap>().unwrap()))
                 })
                 .collect::<Vec<_>>();
 
-            // TODO: Rebase to remove this part, unnecessary
-            let non_policy = Concrete::Unsatisfiable;
-            node_compilations[1] = TapTree::Leaf(Arc::from(non_policy.compile::<Tap>().unwrap()));
-
             // Arrange leaf compilations (acc. to probabilities) using huffman encoding into a TapTree
-            let mut left_tree = TapTree::Tree(
-                Arc::from(node_compilations[0].clone()),
-                Arc::from(node_compilations[1].clone()),
+            let tree = TapTree::Tree(
+                Arc::from(TapTree::Tree(
+                    Arc::from(node_compilations[4].clone()),
+                    Arc::from(node_compilations[5].clone()),
+                )),
+                Arc::from(TapTree::Tree(
+                    Arc::from(TapTree::Tree(
+                        Arc::from(node_compilations[3].clone()),
+                        Arc::from(TapTree::Tree(
+                            Arc::from(node_compilations[0].clone()),
+                            Arc::from(node_compilations[2].clone()),
+                        )),
+                    )),
+                    Arc::from(node_compilations[6].clone()),
+                )),
             );
-            left_tree = TapTree::Tree(
-                Arc::from(left_tree),
-                Arc::from(node_compilations[3].clone()),
-            );
-            left_tree = TapTree::Tree(
-                Arc::from(node_compilations[5].clone()),
-                Arc::from(left_tree),
-            );
-            let mut right_tree = TapTree::Tree(
-                Arc::from(node_compilations[2].clone()),
-                Arc::from(node_compilations[4].clone()),
-            );
-            right_tree = TapTree::Tree(
-                Arc::from(node_compilations[6].clone()),
-                Arc::from(right_tree),
-            );
-
-            let tree = TapTree::Tree(Arc::from(left_tree), Arc::from(right_tree));
 
             let expected_descriptor = Descriptor::new_tr("D".to_string(), Some(tree)).unwrap();
-            let descriptor = policy
-                .compile_tr(Some(unspendable_key.clone()), false)
-                .unwrap();
             assert_eq!(descriptor, expected_descriptor);
         }
     }

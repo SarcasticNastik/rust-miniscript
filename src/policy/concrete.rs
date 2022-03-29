@@ -208,7 +208,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     // debug_assert!(( *c1 - Self::tr_node_cost(&ms1, p1.0, &(prev_cost1.0).0).0 ).abs() < 0.1);
                     // debug_assert!(( *c2 - Self::tr_node_cost(&ms2, p2.0, &(prev_cost2.0).0).0 ).abs() < 0.1);
 
-                    eprintln!("left:{:?}\tright:{:?}", ms1, ms2);
+                    // eprintln!("left:{:?}\tright:{:?}", ms1, ms2);
                     // Find float_to_integer ratio
                     // https://stackoverflow.com/questions/56821119/converting-floating-ratios-to-int
                     let parent_policy = Policy::<Pk>::Or(vec![
@@ -222,10 +222,10 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     let parent_cost = Self::tr_node_cost(&parent_compilation, p1.0 + p2.0, &cost);
                     let children_cost = OrdF64((prev_cost1.0).0 + (prev_cost2.0).0); // 32. * (p1/(p1+p2) + p2/(p1+p2)) -> extra cost due to increase in node
 
-                    eprintln!(
-                        "parent{:?}-{:?}\t children:{:?}",
-                        parent_compilation, parent_cost, children_cost
-                    );
+                    // eprintln!(
+                    //     "parent{:?}-{:?}\t children:{:?}",
+                    //     parent_compilation, parent_cost, children_cost
+                    // );
                     policy_cache.remove(&TapTree::Leaf(ms1.clone()));
                     policy_cache.remove(&TapTree::Leaf(ms2.clone()));
                     let p = p1.0 + p2.0;

@@ -180,25 +180,37 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// Taproot Tree cost (with `branch_prob`)
     #[cfg(feature = "compiler")]
     fn tr_node_cost(ms: &Miniscript<Pk, Tap>, prob: f64, cost: &f64) -> OrdF64 {
-        OrdF64(ms.script_size() as f64 + prob * cost)
+        OrdF64(prob * (ms.script_size() as f64 + cost))
     }
 
     #[cfg(feature = "compiler")]
-    fn taptree_cost(tr: &TapTree<Pk>, ms_cache: &MsTapCache<Pk> , policy_cache: &PolicyTapCache<Pk>, depth: u32) -> f64 {
+    fn taptree_cost(
+        tr: &TapTree<Pk>,
+        ms_cache: &MsTapCache<Pk>,
+        policy_cache: &PolicyTapCache<Pk>,
+        depth: u32,
+    ) -> f64 {
         match *tr {
             TapTree::Tree(ref l, ref r) => {
-                Self::taptree_cost(l, ms_cache, policy_cache, depth + 1) + Self::taptree_cost(r, ms_cache, policy_cache, depth + 1)
+                Self::taptree_cost(l, ms_cache, policy_cache, depth + 1)
+                    + Self::taptree_cost(r, ms_cache, policy_cache, depth + 1)
             }
             TapTree::Leaf(ref ms) => {
                 let prob = match ms_cache.get(ms) {
                     Some(p) => *p,
-                    None => panic!("Probability should exist for given ms"),
+                    None => {
+                        eprintln!("Miniscript: {}", ms);
+                        panic!("Probability should exist for given ms");
+                    }
                 };
-                let sat_cost = match policy_cache.get(ms) {
+                let sat_cost = match policy_cache.get(&TapTree::Leaf(Arc::clone(ms))) {
                     Some(satisfaction_cost) => satisfaction_cost.1,
-                    None => panic!("Cost should exist for the given ms"),
+                    None => {
+                        eprintln!("Miniscript: {}", ms);
+                        panic!("Cost should exist for the given ms");
+                    }
                 };
-                prob * (ms.script_size() + sat_cost + 32. * depth)
+                prob * (ms.script_size() as f64 + sat_cost + 32. * depth as f64)
             }
         }
     }
@@ -207,7 +219,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     fn with_huffman_tree_eff(
         ms: Vec<(OrdF64, (Miniscript<Pk, Tap>, f64))>,
         policy_cache: &mut PolicyTapCache<Pk>,
-        ms_cache: &mut MsTapCache<Pk>
+        ms_cache: &mut MsTapCache<Pk>,
     ) -> Result<TapTree<Pk>, Error> {
         let mut node_weights = BinaryHeap::<(Reverse<OrdF64>, OrdF64, TapTree<Pk>)>::new(); // (cost, branch_prob, tree)
         for (prob, script) in ms {
@@ -244,6 +256,45 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     let children_cost =
                         OrdF64((prev_cost1.0).0 + (prev_cost2.0).0 + 32. * (p1.0 + p2.0)); // 32. * (p1/(p1+p2) + p2/(p1+p2)) -> extra cost due to increase in node
 
+                    ms_cache.insert(Arc::from(parent_compilation.clone()), p1.0 + p2.0);
+                    // This cost is the net cost, not just the satisfaction cost
+                    // Now, decide what to save. `satisfaction_cost` or `net cost`.
+                    policy_cache.insert(
+                        TapTree::Leaf(Arc::from(parent_compilation.clone())),
+                        (parent_policy, parent_cost.0),
+                    );
+
+                    assert_eq!(
+                        parent_cost.0,
+                        Self::taptree_cost(
+                            &TapTree::Leaf(Arc::from(parent_compilation.clone())),
+                            ms_cache,
+                            policy_cache,
+                            0
+                        )
+                    );
+                    eprintln!("First assert works!");
+                    assert_eq!(
+                        (prev_cost1.0).0,
+                        Self::taptree_cost(
+                            &TapTree::Leaf(Arc::from(ms1.clone())),
+                            ms_cache,
+                            policy_cache,
+                            0
+                        )
+                    );
+                    eprintln!("Second assert works!");
+                    assert_eq!(
+                        (prev_cost2.0).0,
+                        Self::taptree_cost(
+                            &TapTree::Leaf(Arc::from(ms2.clone())),
+                            ms_cache,
+                            policy_cache,
+                            0
+                        )
+                    );
+                    eprintln!("All assert work");
+
                     policy_cache.remove(&TapTree::Leaf(ms1.clone()));
                     policy_cache.remove(&TapTree::Leaf(ms2.clone()));
                     let p = p1.0 + p2.0;
@@ -258,7 +309,6 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                         )
                     } else {
                         let node = TapTree::Leaf(Arc::from(parent_compilation));
-                        policy_cache.insert(node.clone(), (parent_policy, parent_cost.0));
                         (Reverse(parent_cost), OrdF64(p), node)
                     });
                 }
@@ -332,16 +382,15 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                 let compilation = compiler::tr_best_compilation::<Pk, Tap>(policy).unwrap();
                 policy_cache.insert(
                     TapTree::Leaf(Arc::from(compilation.0.clone())),
-                    (policy.clone(), compilatio.1), // (policy, sat_cost)
+                    (policy.clone(), compilation.1), // (policy, sat_cost)
                 );
-                ms_cache.insert(
-                    Arc::from(compilation.0.clone()),
-                    prob,
-                );
+                ms_cache.insert(Arc::from(compilation.0.clone()), prob);
                 (OrdF64(prob), compilation) // (branch_prob, comp=(ms, sat_cost))
             })
             .collect();
-        let taptree = Self::with_huffman_tree_eff(leaf_compilations, &mut policy_cache, &mut ms_cache).unwrap();
+        let taptree =
+            Self::with_huffman_tree_eff(leaf_compilations, &mut policy_cache, &mut ms_cache)
+                .unwrap();
         Ok(taptree)
     }
 

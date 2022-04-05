@@ -249,10 +249,12 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                         ((p2.0 * 1e4).round() as usize, right_pol.clone()),
                     ]);
 
-                    let (parent_compilation, cost) =
+                    let (parent_compilation, sat_cost) =
                         compiler::tr_best_compilation::<Pk, Tap>(&parent_policy)?;
 
-                    let parent_cost = Self::tr_node_cost(&parent_compilation, p1.0 + p2.0, &cost);
+                    let parent_cost =
+                        Self::tr_node_cost(&parent_compilation, p1.0 + p2.0, &sat_cost);
+                    // Children cost =  their ms cost + the other costs
                     let children_cost =
                         OrdF64((prev_cost1.0).0 + (prev_cost2.0).0 + 32. * (p1.0 + p2.0)); // 32. * (p1/(p1+p2) + p2/(p1+p2)) -> extra cost due to increase in node
 
@@ -261,7 +263,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     // Now, decide what to save. `satisfaction_cost` or `net cost`.
                     policy_cache.insert(
                         TapTree::Leaf(Arc::from(parent_compilation.clone())),
-                        (parent_policy, parent_cost.0),
+                        (parent_policy, sat_cost),
                     );
 
                     assert_eq!(
@@ -273,7 +275,6 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                             0
                         )
                     );
-                    eprintln!("First assert works!");
                     assert_eq!(
                         (prev_cost1.0).0,
                         Self::taptree_cost(
@@ -283,7 +284,6 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                             0
                         )
                     );
-                    eprintln!("Second assert works!");
                     assert_eq!(
                         (prev_cost2.0).0,
                         Self::taptree_cost(
@@ -293,7 +293,6 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                             0
                         )
                     );
-                    eprintln!("All assert work");
 
                     policy_cache.remove(&TapTree::Leaf(ms1.clone()));
                     policy_cache.remove(&TapTree::Leaf(ms2.clone()));

@@ -45,7 +45,7 @@ use {Error, ForEach, ForEachKey, MiniscriptKey};
 type PolicyTapCache<Pk> = BTreeMap<TapTree<Pk>, (Policy<Pk>, f64)>;
 
 #[cfg(feature = "compiler")]
-type MsTapCache<Pk> = BTreeMap<Arc<Miniscript<Pk, Tap>>, f64>;
+type MsTapCache<Pk> = BTreeMap<Arc<TapTree<Pk>>, f64>;
 
 /// Concrete policy which corresponds directly to a Miniscript structure,
 /// and whose disjunctions are annotated with satisfaction probabilities
@@ -196,7 +196,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     + Self::taptree_cost(r, ms_cache, policy_cache, depth + 1)
             }
             TapTree::Leaf(ref ms) => {
-                let prob = match ms_cache.get(ms) {
+                let prob = match ms_cache.get(&Arc::from(TapTree::Leaf(ms.clone()))) {
                     Some(p) => *p,
                     None => {
                         eprintln!("Miniscript: {}", ms);
@@ -258,12 +258,14 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     let children_cost =
                         OrdF64((prev_cost1.0).0 + (prev_cost2.0).0 + 32. * (p1.0 + p2.0)); // 32. * (p1/(p1+p2) + p2/(p1+p2)) -> extra cost due to increase in node
 
-                    ms_cache.insert(Arc::from(parent_compilation.clone()), p1.0 + p2.0);
-                    // This cost is the net cost, not just the satisfaction cost
-                    // Now, decide what to save. `satisfaction_cost` or `net cost`.
+                    let p = p1.0 + p2.0;
+                    ms_cache.insert(
+                        Arc::from(TapTree::Leaf(Arc::from(parent_compilation.clone()))),
+                        p,
+                    );
                     policy_cache.insert(
                         TapTree::Leaf(Arc::from(parent_compilation.clone())),
-                        (parent_policy, sat_cost),
+                        (parent_policy.clone(), sat_cost),
                     );
 
                     assert_eq!(
@@ -294,16 +296,29 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                         )
                     );
 
-                    policy_cache.remove(&TapTree::Leaf(ms1.clone()));
-                    policy_cache.remove(&TapTree::Leaf(ms2.clone()));
-                    let p = p1.0 + p2.0;
+                    // policy_cache.remove(&TapTree::Leaf(ms1.clone()));
+                    // policy_cache.remove(&TapTree::Leaf(ms2.clone()));
                     node_weights.push(if parent_cost > children_cost {
+                        ms_cache.insert(
+                            Arc::from(TapTree::Tree(
+                                Arc::from(TapTree::Leaf(ms1.clone())),
+                                Arc::from(TapTree::Leaf(ms2.clone())),
+                            )),
+                            p,
+                        );
+                        policy_cache.insert(
+                            TapTree::Tree(
+                                Arc::from(TapTree::Leaf(ms1.clone())),
+                                Arc::from(TapTree::Leaf(ms2.clone())),
+                            ),
+                            (parent_policy, sat_cost),
+                        );
                         (
                             Reverse(children_cost),
                             OrdF64(p),
                             TapTree::Tree(
-                                Arc::from(TapTree::Leaf(ms1)),
-                                Arc::from(TapTree::Leaf(ms2)),
+                                Arc::from(TapTree::Leaf(ms1.clone())),
+                                Arc::from(TapTree::Leaf(ms2.clone())),
                             ),
                         )
                     } else {
@@ -312,13 +327,69 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     });
                 }
                 (ms1, ms2) => {
+                    // Retrieve the respective policies
+                    let (left_pol, _c1) = policy_cache
+                        .get(&ms1)
+                        .ok_or_else(|| errstr("No corresponding policy found"))?;
+
+                    let (right_pol, _c2) = policy_cache
+                        .get(&ms2)
+                        .ok_or_else(|| errstr("No corresponding policy found"))?;
+
+                    let parent_policy = Policy::Or(vec![
+                        ((p1.0 * 1e4).round() as usize, left_pol.clone()),
+                        ((p2.0 * 1e4).round() as usize, right_pol.clone()),
+                    ]);
+
+                    let (parent_compilation, sat_cost) =
+                        compiler::tr_best_compilation::<Pk, Tap>(&parent_policy)?;
+
                     let p = p1.0 + p2.0;
-                    let cost = OrdF64((prev_cost1.0).0 + (prev_cost2.0).0 + 32.0);
-                    node_weights.push((
-                        Reverse(cost),
-                        OrdF64(p),
-                        TapTree::Tree(Arc::from(ms1), Arc::from(ms2)),
+                    ms_cache.insert(
+                        Arc::from(TapTree::Leaf(Arc::from(parent_compilation.clone()))),
+                        p,
+                    );
+                    policy_cache.insert(
+                        TapTree::Leaf(Arc::from(parent_compilation.clone())),
+                        (parent_policy.clone(), sat_cost),
+                    );
+
+                    let parent_cost = OrdF64(Self::taptree_cost(
+                        &TapTree::Leaf(Arc::from(parent_compilation.clone())),
+                        ms_cache,
+                        policy_cache,
+                        0,
                     ));
+                    // Children cost =  their ms cost + the other costs
+                    let children_cost = OrdF64(
+                        Self::taptree_cost(&ms1, ms_cache, policy_cache, 0)
+                            + Self::taptree_cost(&ms2, ms_cache, policy_cache, 0),
+                    ); // 32. * (p1/(p1+p2) + p2/(p1+p2)) -> extra cost due to increase in node
+
+                    // Just for testing purposes.
+                    // policy_cache.remove(&ms1)
+                    // policy_cache.remove(&ms2)
+                    node_weights.push(if parent_cost > children_cost {
+                        ms_cache.insert(
+                            Arc::from(TapTree::Tree(
+                                Arc::from(ms1.clone()),
+                                Arc::from(ms2.clone()),
+                            )),
+                            p,
+                        );
+                        policy_cache.insert(
+                            TapTree::Tree(Arc::from(ms1.clone()), Arc::from(ms2.clone())),
+                            (parent_policy, sat_cost),
+                        );
+                        (
+                            Reverse(children_cost),
+                            OrdF64(p),
+                            TapTree::Tree(Arc::from(ms1), Arc::from(ms2)),
+                        )
+                    } else {
+                        let node = TapTree::Leaf(Arc::from(parent_compilation));
+                        (Reverse(parent_cost), OrdF64(p), node)
+                    });
                 }
             }
         }
@@ -383,7 +454,10 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     TapTree::Leaf(Arc::from(compilation.0.clone())),
                     (policy.clone(), compilation.1), // (policy, sat_cost)
                 );
-                ms_cache.insert(Arc::from(compilation.0.clone()), prob);
+                ms_cache.insert(
+                    Arc::from(TapTree::Leaf(Arc::from(compilation.0.clone()))),
+                    prob,
+                );
                 (OrdF64(prob), compilation) // (branch_prob, comp=(ms, sat_cost))
             })
             .collect();

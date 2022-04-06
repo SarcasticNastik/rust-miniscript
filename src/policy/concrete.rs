@@ -211,19 +211,23 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
 
     #[cfg(feature = "compiler")]
     fn with_huffman_tree_eff(
-        ms: Vec<(OrdF64, (Miniscript<Pk, Tap>, f64))>,
+        ms: Vec<Miniscript<Pk, Tap>>,
         policy_cache: &mut PolicyTapCache<Pk>,
         ms_cache: &mut MsTapCache<Pk>,
     ) -> Result<TapTree<Pk>, Error> {
         let mut node_weights = BinaryHeap::<(Reverse<OrdF64>, OrdF64, TapTree<Pk>)>::new(); // (cost, branch_prob, tree)
-        for (prob, script) in ms {
+        for script in ms {
             let wt = OrdF64(Self::taptree_cost(
-                &TapTree::Leaf(Arc::from(script.0.clone())),
+                &TapTree::Leaf(Arc::from(script.clone())),
                 ms_cache,
                 policy_cache,
                 0,
             ));
-            node_weights.push((Reverse(wt), prob, TapTree::Leaf(Arc::new(script.0))));
+            let prob = match ms_cache.get(&TapTree::Leaf(Arc::from(script.clone()))) {
+                Some(p) => OrdF64(*p),
+                None => return Err(errstr("Probability should exist for the given ms")),
+            };
+            node_weights.push((Reverse(wt), prob, TapTree::Leaf(Arc::new(script))));
         }
         if node_weights.is_empty() {
             return Err(errstr("Empty Miniscript compilation"));
@@ -361,7 +365,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     Arc::from(TapTree::Leaf(Arc::from(compilation.0.clone()))),
                     prob,
                 );
-                (OrdF64(prob), compilation) // (branch_prob, comp=(ms, sat_cost))
+                compilation.0 // (branch_prob, comp=(ms, sat_cost))
             })
             .collect();
         let taptree =

@@ -1132,6 +1132,8 @@ pub fn tr_best_compilation<Pk: MiniscriptKey, Ctx: ScriptContext>(
         //     Some(prob) => Ok(((*x.ms).clone(), x.comp_ext_data.sat_cost)),
         //     None => Err(CompilerError::ImpossibleNonMalleableCompilation), // Change the above compilation error
         // }
+        // TODO: What if we end the Arc<ms> itself (since we are sure of moving the final script around)? Since we really need to
+        // TODO: - Does it violate some property of the function design we have till now?
         Ok(((*x.ms).clone(), x.comp_ext_data.sat_cost))
     }
 }

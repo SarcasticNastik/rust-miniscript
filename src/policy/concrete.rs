@@ -229,170 +229,72 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             return Err(errstr("Empty Miniscript compilation"));
         }
         while node_weights.len() > 1 {
-            let (prev_cost1, p1, s1) = node_weights.pop().expect("len must atleast be two");
-            let (prev_cost2, p2, s2) = node_weights.pop().expect("len must atleast be two");
+            let (_prev_cost1, p1, ms1) = node_weights.pop().expect("len must atleast be two");
+            let (_prev_cost2, p2, ms2) = node_weights.pop().expect("len must atleast be two");
 
-            match (s1, s2) {
-                (TapTree::Leaf(ms1), TapTree::Leaf(ms2)) => {
-                    // Retrieve the respective policies
-                    let (left_pol, _c1) = policy_cache
-                        .get(&TapTree::Leaf(ms1.clone()))
-                        .ok_or_else(|| errstr("No corresponding policy found"))?;
+            // Retrieve the respective policies
+            let (left_pol, _c1) = policy_cache
+                .get(&ms1)
+                .ok_or_else(|| errstr("No corresponding policy found"))?;
 
-                    let (right_pol, _c2) = policy_cache
-                        .get(&TapTree::Leaf(ms2.clone()))
-                        .ok_or_else(|| errstr("No corresponding policy found"))?;
+            let (right_pol, _c2) = policy_cache
+                .get(&ms2)
+                .ok_or_else(|| errstr("No corresponding policy found"))?;
 
-                    let parent_policy = Policy::Or(vec![
-                        ((p1.0 * 1e4).round() as usize, left_pol.clone()),
-                        ((p2.0 * 1e4).round() as usize, right_pol.clone()),
-                    ]);
+            let parent_policy = Policy::Or(vec![
+                ((p1.0 * 1e4).round() as usize, left_pol.clone()),
+                ((p2.0 * 1e4).round() as usize, right_pol.clone()),
+            ]);
 
-                    let (parent_compilation, sat_cost) =
-                        compiler::tr_best_compilation::<Pk, Tap>(&parent_policy)?;
+            let (parent_compilation, sat_cost) =
+                compiler::tr_best_compilation::<Pk, Tap>(&parent_policy)?;
 
-                    let p = p1.0 + p2.0;
-                    ms_cache.insert(
-                        Arc::from(TapTree::Leaf(Arc::from(parent_compilation.clone()))),
-                        p,
-                    );
-                    policy_cache.insert(
-                        TapTree::Leaf(Arc::from(parent_compilation.clone())),
-                        (parent_policy.clone(), sat_cost),
-                    );
+            let p = p1.0 + p2.0;
+            ms_cache.insert(
+                Arc::from(TapTree::Leaf(Arc::from(parent_compilation.clone()))),
+                p,
+            );
+            policy_cache.insert(
+                TapTree::Leaf(Arc::from(parent_compilation.clone())),
+                (parent_policy.clone(), sat_cost),
+            );
 
-                    let parent_cost = OrdF64(Self::taptree_cost(
-                        &TapTree::Leaf(Arc::from(parent_compilation.clone())),
-                        ms_cache,
-                        policy_cache,
-                        0,
-                    ));
-                    // Children cost =  their ms cost + the other costs
-                    let children_cost = OrdF64(
-                        Self::taptree_cost(&TapTree::Leaf(ms1.clone()), ms_cache, policy_cache, 0)
-                            + Self::taptree_cost(
-                                &TapTree::Leaf(ms2.clone()),
-                                ms_cache,
-                                policy_cache,
-                                0,
-                            ),
-                    );
+            let parent_cost = OrdF64(Self::taptree_cost(
+                &TapTree::Leaf(Arc::from(parent_compilation.clone())),
+                ms_cache,
+                policy_cache,
+                0,
+            ));
+            // Children cost =  their ms cost + the other costs
+            let children_cost = OrdF64(
+                Self::taptree_cost(&ms1, ms_cache, policy_cache, 0)
+                    + Self::taptree_cost(&ms2, ms_cache, policy_cache, 0),
+            );
 
-                    assert_eq!(
-                        (prev_cost1.0).0,
-                        Self::taptree_cost(
-                            &TapTree::Leaf(Arc::from(ms1.clone())),
-                            ms_cache,
-                            policy_cache,
-                            0
-                        )
-                    );
-                    assert_eq!(
-                        (prev_cost2.0).0,
-                        Self::taptree_cost(
-                            &TapTree::Leaf(Arc::from(ms2.clone())),
-                            ms_cache,
-                            policy_cache,
-                            0
-                        )
-                    );
-
-                    // policy_cache.remove(&TapTree::Leaf(ms1.clone()));
-                    // policy_cache.remove(&TapTree::Leaf(ms2.clone()));
-                    node_weights.push(if parent_cost > children_cost {
-                        ms_cache.insert(
-                            Arc::from(TapTree::Tree(
-                                Arc::from(TapTree::Leaf(ms1.clone())),
-                                Arc::from(TapTree::Leaf(ms2.clone())),
-                            )),
-                            p,
-                        );
-                        policy_cache.insert(
-                            TapTree::Tree(
-                                Arc::from(TapTree::Leaf(ms1.clone())),
-                                Arc::from(TapTree::Leaf(ms2.clone())),
-                            ),
-                            (parent_policy, sat_cost),
-                        );
-                        (
-                            Reverse(children_cost),
-                            OrdF64(p),
-                            TapTree::Tree(
-                                Arc::from(TapTree::Leaf(ms1.clone())),
-                                Arc::from(TapTree::Leaf(ms2.clone())),
-                            ),
-                        )
-                    } else {
-                        let node = TapTree::Leaf(Arc::from(parent_compilation));
-                        (Reverse(parent_cost), OrdF64(p), node)
-                    });
-                }
-                (ms1, ms2) => {
-                    // Retrieve the respective policies
-                    let (left_pol, _c1) = policy_cache
-                        .get(&ms1)
-                        .ok_or_else(|| errstr("No corresponding policy found"))?;
-
-                    let (right_pol, _c2) = policy_cache
-                        .get(&ms2)
-                        .ok_or_else(|| errstr("No corresponding policy found"))?;
-
-                    let parent_policy = Policy::Or(vec![
-                        ((p1.0 * 1e4).round() as usize, left_pol.clone()),
-                        ((p2.0 * 1e4).round() as usize, right_pol.clone()),
-                    ]);
-
-                    let (parent_compilation, sat_cost) =
-                        compiler::tr_best_compilation::<Pk, Tap>(&parent_policy)?;
-
-                    let p = p1.0 + p2.0;
-                    ms_cache.insert(
-                        Arc::from(TapTree::Leaf(Arc::from(parent_compilation.clone()))),
-                        p,
-                    );
-                    policy_cache.insert(
-                        TapTree::Leaf(Arc::from(parent_compilation.clone())),
-                        (parent_policy.clone(), sat_cost),
-                    );
-
-                    let parent_cost = OrdF64(Self::taptree_cost(
-                        &TapTree::Leaf(Arc::from(parent_compilation.clone())),
-                        ms_cache,
-                        policy_cache,
-                        0,
-                    ));
-                    // Children cost =  their ms cost + the other costs
-                    let children_cost = OrdF64(
-                        Self::taptree_cost(&ms1, ms_cache, policy_cache, 0)
-                            + Self::taptree_cost(&ms2, ms_cache, policy_cache, 0),
-                    ); // 32. * (p1/(p1+p2) + p2/(p1+p2)) -> extra cost due to increase in node
-
-                    // Just for testing purposes.
-                    // policy_cache.remove(&ms1)
-                    // policy_cache.remove(&ms2)
-                    node_weights.push(if parent_cost > children_cost {
-                        ms_cache.insert(
-                            Arc::from(TapTree::Tree(
-                                Arc::from(ms1.clone()),
-                                Arc::from(ms2.clone()),
-                            )),
-                            p,
-                        );
-                        policy_cache.insert(
-                            TapTree::Tree(Arc::from(ms1.clone()), Arc::from(ms2.clone())),
-                            (parent_policy, sat_cost),
-                        );
-                        (
-                            Reverse(children_cost),
-                            OrdF64(p),
-                            TapTree::Tree(Arc::from(ms1), Arc::from(ms2)),
-                        )
-                    } else {
-                        let node = TapTree::Leaf(Arc::from(parent_compilation));
-                        (Reverse(parent_cost), OrdF64(p), node)
-                    });
-                }
-            }
+            // Just for testing purposes.
+            // policy_cache.remove(&ms1)
+            // policy_cache.remove(&ms2)
+            node_weights.push(if parent_cost > children_cost {
+                ms_cache.insert(
+                    Arc::from(TapTree::Tree(
+                        Arc::from(ms1.clone()),
+                        Arc::from(ms2.clone()),
+                    )),
+                    p,
+                );
+                policy_cache.insert(
+                    TapTree::Tree(Arc::from(ms1.clone()), Arc::from(ms2.clone())),
+                    (parent_policy, sat_cost),
+                );
+                (
+                    Reverse(children_cost),
+                    OrdF64(p),
+                    TapTree::Tree(Arc::from(ms1), Arc::from(ms2)),
+                )
+            } else {
+                let node = TapTree::Leaf(Arc::from(parent_compilation));
+                (Reverse(parent_cost), OrdF64(p), node)
+            });
         }
         debug_assert!(node_weights.len() == 1);
         let node = node_weights

@@ -40,9 +40,8 @@ use {
 };
 use {Error, ForEach, ForEachKey, MiniscriptKey};
 
-// Change to Arc<TapTree<Pk>>
 #[cfg(feature = "compiler")]
-type PolicyTapCache<Pk> = BTreeMap<TapTree<Pk>, (Policy<Pk>, f64)>;
+type PolicyTapCache<Pk> = BTreeMap<Arc<TapTree<Pk>>, (Policy<Pk>, f64)>;
 
 #[cfg(feature = "compiler")]
 type MsTapCache<Pk> = BTreeMap<Arc<TapTree<Pk>>, f64>;
@@ -197,7 +196,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                         panic!("Probability should exist for given ms");
                     }
                 };
-                let sat_cost = match policy_cache.get(&TapTree::Leaf(Arc::clone(ms))) {
+                let sat_cost = match policy_cache.get(&Arc::from(TapTree::Leaf(Arc::clone(ms)))) {
                     Some(satisfaction_cost) => satisfaction_cost.1,
                     None => {
                         eprintln!("Miniscript: {}", ms);
@@ -238,11 +237,11 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
 
             // Retrieve the respective policies
             let (left_pol, _c1) = policy_cache
-                .get(&ms1)
+                .get(&Arc::from(ms1.clone()))
                 .ok_or_else(|| errstr("No corresponding policy found"))?;
 
             let (right_pol, _c2) = policy_cache
-                .get(&ms2)
+                .get(&Arc::from(ms2.clone()))
                 .ok_or_else(|| errstr("No corresponding policy found"))?;
 
             let parent_policy = Policy::Or(vec![
@@ -259,7 +258,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                 p,
             );
             policy_cache.insert(
-                TapTree::Leaf(Arc::from(parent_compilation.clone())),
+                Arc::new(TapTree::Leaf(Arc::from(parent_compilation.clone()))),
                 (parent_policy.clone(), sat_cost),
             );
 
@@ -287,7 +286,10 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     p,
                 );
                 policy_cache.insert(
-                    TapTree::Tree(Arc::from(ms1.clone()), Arc::from(ms2.clone())),
+                    Arc::new(TapTree::Tree(
+                        Arc::from(ms1.clone()),
+                        Arc::from(ms2.clone()),
+                    )),
                     (parent_policy, sat_cost),
                 );
                 (
@@ -358,7 +360,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             .map(|(prob, ref policy)| {
                 let compilation = compiler::tr_best_compilation::<Pk, Tap>(policy).unwrap();
                 policy_cache.insert(
-                    TapTree::Leaf(Arc::from(compilation.0.clone())),
+                    Arc::new(TapTree::Leaf(Arc::from(compilation.0.clone()))),
                     (policy.clone(), compilation.1), // (policy, sat_cost)
                 );
                 ms_cache.insert(

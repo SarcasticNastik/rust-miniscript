@@ -177,12 +177,6 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         Ok(node)
     }
 
-    /// Taproot Tree cost (with `branch_prob`)
-    #[cfg(feature = "compiler")]
-    fn tr_node_cost(ms: &Miniscript<Pk, Tap>, prob: f64, cost: &f64) -> OrdF64 {
-        OrdF64(prob * (ms.script_size() as f64 + cost))
-    }
-
     #[cfg(feature = "compiler")]
     fn taptree_cost(
         tr: &TapTree<Pk>,
@@ -223,7 +217,12 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     ) -> Result<TapTree<Pk>, Error> {
         let mut node_weights = BinaryHeap::<(Reverse<OrdF64>, OrdF64, TapTree<Pk>)>::new(); // (cost, branch_prob, tree)
         for (prob, script) in ms {
-            let wt = Self::tr_node_cost(&script.0, prob.0, &script.1);
+            let wt = OrdF64(Self::taptree_cost(
+                &TapTree::Leaf(Arc::from(script.0.clone())),
+                ms_cache,
+                policy_cache,
+                0,
+            ));
             node_weights.push((Reverse(wt), prob, TapTree::Leaf(Arc::new(script.0))));
         }
         if node_weights.is_empty() {
@@ -252,12 +251,6 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     let (parent_compilation, sat_cost) =
                         compiler::tr_best_compilation::<Pk, Tap>(&parent_policy)?;
 
-                    let parent_cost =
-                        Self::tr_node_cost(&parent_compilation, p1.0 + p2.0, &sat_cost);
-                    // Children cost =  their ms cost + the other costs
-                    let children_cost =
-                        OrdF64((prev_cost1.0).0 + (prev_cost2.0).0 + 32. * (p1.0 + p2.0)); // 32. * (p1/(p1+p2) + p2/(p1+p2)) -> extra cost due to increase in node
-
                     let p = p1.0 + p2.0;
                     ms_cache.insert(
                         Arc::from(TapTree::Leaf(Arc::from(parent_compilation.clone()))),
@@ -268,15 +261,23 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                         (parent_policy.clone(), sat_cost),
                     );
 
-                    assert_eq!(
-                        parent_cost.0,
-                        Self::taptree_cost(
-                            &TapTree::Leaf(Arc::from(parent_compilation.clone())),
-                            ms_cache,
-                            policy_cache,
-                            0
-                        )
+                    let parent_cost = OrdF64(Self::taptree_cost(
+                        &TapTree::Leaf(Arc::from(parent_compilation.clone())),
+                        ms_cache,
+                        policy_cache,
+                        0,
+                    ));
+                    // Children cost =  their ms cost + the other costs
+                    let children_cost = OrdF64(
+                        Self::taptree_cost(&TapTree::Leaf(ms1.clone()), ms_cache, policy_cache, 0)
+                            + Self::taptree_cost(
+                                &TapTree::Leaf(ms2.clone()),
+                                ms_cache,
+                                policy_cache,
+                                0,
+                            ),
                     );
+
                     assert_eq!(
                         (prev_cost1.0).0,
                         Self::taptree_cost(

@@ -1120,7 +1120,7 @@ pub fn best_compilation<Pk: MiniscriptKey, Ctx: ScriptContext>(
 /// Obtain the best compilation of for p=1.0 and q=0
 pub fn tr_best_compilation<Pk: MiniscriptKey, Ctx: ScriptContext>(
     policy: &Concrete<Pk>,
-) -> Result<(Miniscript<Pk, Ctx>, f64), CompilerError> {
+) -> Result<(Arc<Miniscript<Pk, Ctx>>, f64), CompilerError> {
     let mut policy_cache = PolicyCache::<Pk, Ctx>::new();
     let x: AstElemExt<Pk, Ctx> = best_t(&mut policy_cache, policy, 1.0, None)?;
     if !x.ms.ty.mall.safe {
@@ -1128,13 +1128,9 @@ pub fn tr_best_compilation<Pk: MiniscriptKey, Ctx: ScriptContext>(
     } else if !x.ms.ty.mall.non_malleable {
         Err(CompilerError::ImpossibleNonMalleableCompilation)
     } else {
-        // match x.comp_ext_data.branch_prob {
-        //     Some(prob) => Ok(((*x.ms).clone(), x.comp_ext_data.sat_cost)),
-        //     None => Err(CompilerError::ImpossibleNonMalleableCompilation), // Change the above compilation error
-        // }
         // TODO: What if we end the Arc<ms> itself (since we are sure of moving the final script around)? Since we really need to
         // TODO: - Does it violate some property of the function design we have till now?
-        Ok(((*x.ms).clone(), x.comp_ext_data.sat_cost))
+        Ok((x.ms, x.comp_ext_data.sat_cost))
     }
 }
 /// Obtain the best B expression with given sat and dissat

@@ -210,23 +210,23 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
 
     #[cfg(feature = "compiler")]
     fn with_huffman_tree_eff(
-        ms: Vec<Miniscript<Pk, Tap>>,
+        ms: Vec<Arc<Miniscript<Pk, Tap>>>,
         policy_cache: &mut PolicyTapCache<Pk>,
         ms_cache: &mut MsTapCache<Pk>,
     ) -> Result<TapTree<Pk>, Error> {
         let mut node_weights = BinaryHeap::<(Reverse<OrdF64>, OrdF64, TapTree<Pk>)>::new(); // (cost, branch_prob, tree)
         for script in ms {
             let wt = OrdF64(Self::taptree_cost(
-                &TapTree::Leaf(Arc::from(script.clone())),
+                &TapTree::Leaf(Arc::clone(&script)),
                 ms_cache,
                 policy_cache,
                 0,
             ));
-            let prob = match ms_cache.get(&TapTree::Leaf(Arc::from(script.clone()))) {
+            let prob = match ms_cache.get(&TapTree::Leaf(Arc::clone(&script))) {
                 Some(p) => OrdF64(*p),
                 None => return Err(errstr("Probability should exist for the given ms")),
             };
-            node_weights.push((Reverse(wt), prob, TapTree::Leaf(Arc::new(script))));
+            node_weights.push((Reverse(wt), prob, TapTree::Leaf(script)));
         }
         if node_weights.is_empty() {
             return Err(errstr("Empty Miniscript compilation"));
@@ -253,17 +253,14 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                 compiler::tr_best_compilation::<Pk, Tap>(&parent_policy)?;
 
             let p = p1.0 + p2.0;
-            ms_cache.insert(
-                Arc::from(TapTree::Leaf(Arc::from(parent_compilation.clone()))),
-                p,
-            );
+            ms_cache.insert(Arc::from(TapTree::Leaf(Arc::clone(&parent_compilation))), p);
             policy_cache.insert(
-                Arc::new(TapTree::Leaf(Arc::from(parent_compilation.clone()))),
+                Arc::new(TapTree::Leaf(Arc::clone(&parent_compilation))),
                 (parent_policy.clone(), sat_cost),
             );
 
             let parent_cost = OrdF64(Self::taptree_cost(
-                &TapTree::Leaf(Arc::from(parent_compilation.clone())),
+                &TapTree::Leaf(Arc::clone(&parent_compilation)),
                 ms_cache,
                 policy_cache,
                 0,
@@ -298,7 +295,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     TapTree::Tree(Arc::from(ms1), Arc::from(ms2)),
                 )
             } else {
-                let node = TapTree::Leaf(Arc::from(parent_compilation));
+                let node = TapTree::Leaf(parent_compilation);
                 (Reverse(parent_cost), OrdF64(p), node)
             });
         }
@@ -360,13 +357,10 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             .map(|(prob, ref policy)| {
                 let compilation = compiler::tr_best_compilation::<Pk, Tap>(policy).unwrap();
                 policy_cache.insert(
-                    Arc::new(TapTree::Leaf(Arc::from(compilation.0.clone()))),
+                    Arc::new(TapTree::Leaf(Arc::clone(&compilation.0))),
                     (policy.clone(), compilation.1), // (policy, sat_cost)
                 );
-                ms_cache.insert(
-                    Arc::from(TapTree::Leaf(Arc::from(compilation.0.clone()))),
-                    prob,
-                );
+                ms_cache.insert(Arc::from(TapTree::Leaf(Arc::clone(&compilation.0))), prob);
                 compilation.0 // (branch_prob, comp=(ms, sat_cost))
             })
             .collect();

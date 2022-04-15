@@ -383,7 +383,7 @@ mod tests {
         {
             let policy: Concrete<String> = policy_str!("thresh(2,pk(A),pk(B),pk(C),pk(D))");
             let descriptor = policy
-                .compile_tr(Some(unspendable_key.clone()), false)
+                .compile_tr_private(Some(unspendable_key.clone()))
                 .unwrap();
 
             let ms_compilation: Miniscript<String, Tap> = ms_str!("multi_a(2,A,B,C,D)");
@@ -397,7 +397,7 @@ mod tests {
         {
             let policy: Concrete<String> = policy_str!("or(and(pk(A),pk(B)),and(pk(C),pk(D)))");
             let descriptor = policy
-                .compile_tr(Some(unspendable_key.clone()), false)
+                .compile_tr_private(Some(unspendable_key.clone()))
                 .unwrap();
 
             let left_ms_compilation: Arc<Miniscript<String, Tap>> =
@@ -415,7 +415,7 @@ mod tests {
         {
             // Invalid policy compilation (Duplicate PubKeys)
             let policy: Concrete<String> = policy_str!("or(and(pk(A),pk(B)),and(pk(A),pk(D)))");
-            let descriptor = policy.compile_tr(Some(unspendable_key.clone()), false);
+            let descriptor = policy.compile_tr_private(Some(unspendable_key.clone()));
 
             assert_eq!(
                 descriptor.unwrap_err().to_string(),
@@ -453,7 +453,7 @@ mod tests {
                 )
             );
             let descriptor = policy
-                .compile_tr(Some(unspendable_key.clone()), false)
+                .compile_tr_private(Some(unspendable_key.clone()))
                 .unwrap();
 
             let mut sorted_policy_prob = node_policies

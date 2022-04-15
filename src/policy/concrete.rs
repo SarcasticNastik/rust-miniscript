@@ -323,40 +323,91 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
 
     /// Compile [`Policy::Or`] and [`Policy::Threshold`] according to odds
     #[cfg(feature = "compiler")]
-    fn compile_tr_private(&self) -> Result<TapTree<Pk>, Error> {
-        let leaf_compilations: Vec<_> = self
-            .to_tapleaf_prob_vec(1.0)
-            .into_iter()
-            .filter(|x| x.1 != Policy::Unsatisfiable)
-            .map(|(prob, ref policy)| (OrdF64(prob), compiler::best_compilation(policy).unwrap()))
-            .collect();
-        let taptree = Self::with_huffman_tree(leaf_compilations, |x| x).unwrap();
-        Ok(taptree)
+    pub(crate) fn compile_tr_private(
+        &self,
+        unspendable_key: Option<Pk>,
+    ) -> Result<Descriptor<Pk>, Error> {
+        self.is_valid()?; // Check for validity
+        match self.is_safe_nonmalleable() {
+            (false, _) => Err(Error::from(CompilerError::TopLevelNonSafe)),
+            (_, false) => Err(Error::from(
+                CompilerError::ImpossibleNonMalleableCompilation,
+            )),
+            _ => {
+                let (internal_key, policy) = self.clone().extract_key(unspendable_key)?;
+                let tree = Descriptor::new_tr(
+                    internal_key,
+                    match policy {
+                        Policy::Trivial => None,
+                        policy => {
+                            let leaf_compilations: Vec<_> = policy
+                                .to_tapleaf_prob_vec(1.0)
+                                .into_iter()
+                                .filter(|x| x.1 != Policy::Unsatisfiable)
+                                .map(|(prob, ref pol)| {
+                                    (OrdF64(prob), compiler::best_compilation(pol).unwrap())
+                                })
+                                .collect();
+                            let taptree =
+                                Self::with_huffman_tree(leaf_compilations, |x| x).unwrap();
+                            Some(taptree)
+                        }
+                    },
+                )?;
+                Ok(tree)
+            }
+        }
     }
 
     /// Compile [`Policy`] into a [`TapTree`]
     #[cfg(feature = "compiler")]
-    fn compile_tr_efficient(&self) -> Result<TapTree<Pk>, Error> {
-        let mut policy_cache = PolicyTapCache::<Pk>::new();
-        let mut ms_cache = MsTapCache::<Pk>::new();
-        let leaf_compilations: Vec<_> = self
-            .to_tapleaf_prob_vec(1.0)
-            .into_iter()
-            .filter(|x| x.1 != Policy::Unsatisfiable)
-            .map(|(prob, ref policy)| {
-                let compilation = compiler::best_compilation_sat::<Pk, Tap>(policy).unwrap();
-                policy_cache.insert(
-                    TapTree::Leaf(Arc::clone(&compilation.0)),
-                    (policy.clone(), compilation.1), // (policy, sat_cost)
-                );
-                ms_cache.insert(TapTree::Leaf(Arc::from(compilation.0.clone())), prob);
-                compilation.0 // (branch_prob, comp=(ms, sat_cost))
-            })
-            .collect();
-        let taptree =
-            Self::with_huffman_tree_eff(leaf_compilations, &mut policy_cache, &mut ms_cache)
-                .unwrap();
-        Ok(taptree)
+    pub fn compile_tr(&self, unspendable_key: Option<Pk>) -> Result<Descriptor<Pk>, Error> {
+        self.is_valid()?; // Check for validity
+        match self.is_safe_nonmalleable() {
+            (false, _) => Err(Error::from(CompilerError::TopLevelNonSafe)),
+            (_, false) => Err(Error::from(
+                CompilerError::ImpossibleNonMalleableCompilation,
+            )),
+            _ => {
+                let (internal_key, policy) = self.clone().extract_key(unspendable_key)?;
+                let tree = Descriptor::new_tr(
+                    internal_key,
+                    match policy {
+                        Policy::Trivial => None,
+                        policy => {
+                            let mut policy_cache = PolicyTapCache::<Pk>::new();
+                            let mut ms_cache = MsTapCache::<Pk>::new();
+                            let leaf_compilations: Vec<_> = policy
+                                .to_tapleaf_prob_vec(1.0)
+                                .into_iter()
+                                .filter(|x| x.1 != Policy::Unsatisfiable)
+                                .map(|(prob, ref pol)| {
+                                    let compilation =
+                                        compiler::best_compilation_sat::<Pk, Tap>(pol).unwrap();
+                                    policy_cache.insert(
+                                        TapTree::Leaf(Arc::clone(&compilation.0)),
+                                        (pol.clone(), compilation.1), // (policy, sat_cost)
+                                    );
+                                    ms_cache.insert(
+                                        TapTree::Leaf(Arc::from(compilation.0.clone())),
+                                        prob,
+                                    );
+                                    compilation.0 // (branch_prob, comp=(ms, sat_cost))
+                                })
+                                .collect();
+                            let taptree = Self::with_huffman_tree_eff(
+                                leaf_compilations,
+                                &mut policy_cache,
+                                &mut ms_cache,
+                            )
+                            .unwrap();
+                            Some(taptree)
+                        }
+                    },
+                )?;
+                Ok(tree)
+            }
+        }
     }
 
     /// Extract the internal_key from policy tree.
@@ -400,40 +451,6 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
             (Some(ref key), _) => Ok((key.clone(), self.translate_unsatisfiable_pk(&key))),
             (_, Some(key)) => Ok((key, self)),
             _ => Err(errstr("No viable internal key found.")),
-        }
-    }
-
-    /// Compile the [`Tr`] descriptor into optimized [`TapTree`] implementation
-    // TODO: We might require other compile errors for Taproot. Will discuss and update.
-    #[cfg(feature = "compiler")]
-    pub fn compile_tr(
-        &self,
-        unspendable_key: Option<Pk>,
-        eff: bool,
-    ) -> Result<Descriptor<Pk>, Error> {
-        self.is_valid()?; // Check for validity
-        match self.is_safe_nonmalleable() {
-            (false, _) => Err(Error::from(CompilerError::TopLevelNonSafe)),
-            (_, false) => Err(Error::from(
-                CompilerError::ImpossibleNonMalleableCompilation,
-            )),
-            _ => {
-                let (internal_key, policy) = self.clone().extract_key(unspendable_key)?;
-                let tree = Descriptor::new_tr(
-                    internal_key,
-                    match policy {
-                        Policy::Trivial => None,
-                        policy => {
-                            if eff {
-                                Some(policy.compile_tr_efficient()?)
-                            } else {
-                                Some(policy.compile_tr_private()?)
-                            }
-                        }
-                    },
-                )?;
-                Ok(tree)
-            }
         }
     }
 

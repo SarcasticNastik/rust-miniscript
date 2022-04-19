@@ -159,19 +159,6 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
         }
     }
 
-    /// Compile [`Policy::Or`] and [`Policy::Threshold`] according to odds
-    #[cfg(feature = "compiler")]
-    fn compile_tr_policy(&self) -> Result<TapTree<Pk>, Error> {
-        let leaf_compilations: Vec<_> = self
-            .to_tapleaf_prob_vec(1.0)
-            .into_iter()
-            .filter(|x| x.1 != Policy::Unsatisfiable)
-            .map(|(prob, ref policy)| (OrdF64(prob), compiler::best_compilation(policy).unwrap()))
-            .collect();
-        let taptree = with_huffman_tree::<Pk>(leaf_compilations).unwrap();
-        Ok(taptree)
-    }
-
     /// Extract the internal_key from policy tree.
     #[cfg(feature = "compiler")]
     fn extract_key(self, unspendable_key: Option<Pk>) -> Result<(Pk, Policy<Pk>), Error> {
@@ -229,7 +216,7 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
     /// the probabilitity of satisfaction for the respective branch in the TapTree.
     // TODO: We might require other compile errors for Taproot.
     #[cfg(feature = "compiler")]
-    pub fn compile_tr(&self, unspendable_key: Option<Pk>) -> Result<Descriptor<Pk>, Error> {
+    pub fn compile_tr_private(&self, unspendable_key: Option<Pk>) -> Result<Descriptor<Pk>, Error> {
         self.is_valid()?; // Check for validity
         match self.is_safe_nonmalleable() {
             (false, _) => Err(Error::from(CompilerError::TopLevelNonSafe)),
@@ -242,7 +229,18 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     internal_key,
                     match policy {
                         Policy::Trivial => None,
-                        policy => Some(policy.compile_tr_policy()?),
+                        policy => {
+                            let leaf_compilations: Vec<_> = policy
+                                .to_tapleaf_prob_vec(1.0)
+                                .into_iter()
+                                .filter(|x| x.1 != Policy::Unsatisfiable)
+                                .map(|(prob, ref pol)| {
+                                    (OrdF64(prob), compiler::best_compilation(pol).unwrap())
+                                })
+                                .collect();
+                            let taptree = with_huffman_tree::<Pk>(leaf_compilations).unwrap();
+                            Some(taptree)
+                        }
                     },
                 )?;
                 Ok(tree)

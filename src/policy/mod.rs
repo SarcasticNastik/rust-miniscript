@@ -373,7 +373,9 @@ mod tests {
         let unspendable_key: String = "UNSPENDABLE".to_string();
         {
             let policy: Concrete<String> = policy_str!("thresh(2,pk(A),pk(B),pk(C),pk(D))");
-            let descriptor = policy.compile_tr(Some(unspendable_key.clone())).unwrap();
+            let descriptor = policy
+                .compile_tr_private(Some(unspendable_key.clone()))
+                .unwrap();
 
             let ms_compilation: Miniscript<String, Tap> = ms_str!("multi_a(2,A,B,C,D)");
             let tree: TapTree<String> = TapTree::Leaf(Arc::new(ms_compilation));
@@ -385,7 +387,9 @@ mod tests {
         // Trivial multi-node compilation
         {
             let policy: Concrete<String> = policy_str!("or(and(pk(A),pk(B)),and(pk(C),pk(D)))");
-            let descriptor = policy.compile_tr(Some(unspendable_key.clone())).unwrap();
+            let descriptor = policy
+                .compile_tr_private(Some(unspendable_key.clone()))
+                .unwrap();
 
             let left_ms_compilation: Arc<Miniscript<String, Tap>> =
                 Arc::new(ms_str!("and_v(v:pk(C),pk(D))"));
@@ -402,7 +406,7 @@ mod tests {
         {
             // Invalid policy compilation (Duplicate PubKeys)
             let policy: Concrete<String> = policy_str!("or(and(pk(A),pk(B)),and(pk(A),pk(D)))");
-            let descriptor = policy.compile_tr(Some(unspendable_key.clone()));
+            let descriptor = policy.compile_tr_private(Some(unspendable_key.clone()));
 
             assert_eq!(
                 descriptor.unwrap_err().to_string(),
@@ -439,7 +443,9 @@ mod tests {
                     node_policies[6]
                 )
             );
-            let descriptor = policy.compile_tr(Some(unspendable_key.clone())).unwrap();
+            let descriptor = policy
+                .compile_tr_private(Some(unspendable_key.clone()))
+                .unwrap();
 
             let mut sorted_policy_prob = node_policies
                 .iter()

@@ -40,3 +40,7 @@ name = "psbt"
 
 [[example]]
 name = "xpub_descriptors"
+
+[[example]]
+name = "taproot"
+required-features = ["compiler"]

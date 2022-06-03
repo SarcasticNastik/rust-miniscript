@@ -254,15 +254,18 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                     match policy {
                         Policy::Trivial => None,
                         policy => {
-                            let leaf_compilations: Vec<_> = policy
-                                .to_tapleaf_prob_vec(1.0)
-                                .into_iter()
-                                .filter(|x| x.1 != Policy::Unsatisfiable)
-                                .map(|(prob, ref pol)| {
-                                    (OrdF64(prob), compiler::best_compilation(pol).unwrap())
-                                })
-                                .collect();
-                            let taptree = with_huffman_tree::<Pk>(leaf_compilations).unwrap();
+                            let vec_policies: Vec<_> = policy.to_tapleaf_prob_vec(1.0);
+                            let mut leaf_compilations: Vec<(OrdF64, Miniscript<Pk, Tap>)> = vec![];
+                            for (prob, pol) in vec_policies {
+                                if pol == Policy::Unsatisfiable {
+                                    continue;
+                                }
+                                leaf_compilations.push((
+                                    OrdF64(prob),
+                                    compiler::best_compilation::<Pk, Tap>(&pol)?,
+                                ));
+                            }
+                            let taptree = with_huffman_tree::<Pk>(leaf_compilations)?;
                             Some(taptree)
                         }
                     },
@@ -295,30 +298,26 @@ impl<Pk: MiniscriptKey> Policy<Pk> {
                             let mut ms_cache = MsTapCache::<Pk>::new();
                             // Obtain the policy compilations and populate the respective caches for
                             // creating the huffman tree later on
-                            let leaf_compilations: Vec<_> = policy
-                                .to_tapleaf_prob_vec(1.0)
-                                .into_iter()
-                                .filter(|x| x.1 != Policy::Unsatisfiable)
-                                .map(|(prob, ref pol)| {
-                                    let compilation =
-                                        compiler::best_compilation_sat::<Pk, Tap>(pol).unwrap();
-                                    policy_cache.insert(
-                                        TapTree::Leaf(Arc::clone(&compilation.0)),
-                                        (pol.clone(), compilation.1), // (policy, sat_cost)
-                                    );
-                                    ms_cache.insert(
-                                        TapTree::Leaf(Arc::from(compilation.0.clone())),
-                                        prob,
-                                    );
-                                    compilation.0
-                                })
-                                .collect();
+                            let vec_policies: Vec<_> = policy.to_tapleaf_prob_vec(1.0);
+                            let mut leaf_compilations: Vec<Arc<Miniscript<Pk, Tap>>> = vec![];
+                            for (prob, pol) in vec_policies {
+                                if pol == Policy::Unsatisfiable {
+                                    continue;
+                                }
+                                let compilation = compiler::best_compilation_sat::<Pk, Tap>(&pol)?;
+                                policy_cache.insert(
+                                    TapTree::Leaf(Arc::clone(&compilation.0)),
+                                    (pol.clone(), compilation.1), // (policy, sat_cost)
+                                );
+                                ms_cache
+                                    .insert(TapTree::Leaf(Arc::from(compilation.0.clone())), prob);
+                                leaf_compilations.push(compilation.0);
+                            }
                             let taptree = with_huffman_tree_eff(
                                 leaf_compilations,
                                 &mut policy_cache,
                                 &mut ms_cache,
-                            )
-                            .unwrap();
+                            )?;
                             Some(taptree)
                         }
                     },

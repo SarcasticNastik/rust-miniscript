@@ -133,6 +133,7 @@ use bitcoin::hashes::{hash160, sha256, Hash};
 pub use crate::descriptor::{Descriptor, DescriptorPublicKey};
 pub use crate::interpreter::Interpreter;
 pub use crate::miniscript::context::{BareCtx, Legacy, ScriptContext, Segwitv0, Tap};
+use crate::miniscript::decode::KeyExpr;
 pub use crate::miniscript::decode::Terminal;
 pub use crate::miniscript::satisfy::{Preimage32, Satisfier};
 pub use crate::miniscript::Miniscript;
@@ -459,12 +460,15 @@ where
 }
 
 /// Either a key or keyhash, but both contain Pk
-pub struct ForEach<'a, Pk: MiniscriptKey>(&'a Pk);
+pub struct ForEach<'a, Pk: MiniscriptKey>(&'a KeyExpr<Pk>);
 
 impl<'a, Pk: MiniscriptKey<Hash = Pk>> ForEach<'a, Pk> {
     /// Convenience method to avoid distinguishing between keys and hashes when these are the same type
     pub fn as_key(&self) -> &'a Pk {
-        self.0
+        match *self {
+            KeyExpr::SingleKey(key) => &key,
+            KeyExpr::MuSig(subs) => todo!(),
+        }
     }
 }
 

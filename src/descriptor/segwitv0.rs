@@ -27,10 +27,7 @@ use crate::miniscript::context::{ScriptContext, ScriptContextError};
 use crate::policy::{semantic, Liftable};
 use crate::prelude::*;
 use crate::util::varint_len;
-use crate::{
-    Error, ForEach, ForEachKey, Miniscript, MiniscriptKey, Satisfier, Segwitv0, ToPublicKey,
-    TranslatePk, Translator,
-};
+use crate::{Error, ForEach, ForEachKey, KeyExpr, Miniscript, MiniscriptKey, Satisfier, Segwitv0, ToPublicKey, TranslatePk, Translator};
 /// A Segwitv0 wsh descriptor
 #[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Wsh<Pk: MiniscriptKey> {
@@ -444,7 +441,7 @@ impl<Pk: MiniscriptKey> ForEachKey<Pk> for Wpkh<Pk> {
         Pk: 'a,
         Pk::Hash: 'a,
     {
-        pred(ForEach(&self.pk))
+        pred(ForEach(&KeyExpr::SingleKey(self.pk.clone())))
     }
 }
 

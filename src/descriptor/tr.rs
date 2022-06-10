@@ -18,10 +18,7 @@ use crate::policy::semantic::Policy;
 use crate::policy::Liftable;
 use crate::prelude::*;
 use crate::util::{varint_len, witness_size};
-use crate::{
-    errstr, Error, ForEach, ForEachKey, MiniscriptKey, Satisfier, Tap, ToPublicKey, TranslatePk,
-    Translator,
-};
+use crate::{errstr, Error, ForEach, ForEachKey, MiniscriptKey, Satisfier, Tap, ToPublicKey, TranslatePk, Translator, KeyExpr};
 
 /// A Taproot Tree representation.
 // Hidden leaves are not yet supported in descriptor spec. Conceptually, it should
@@ -587,7 +584,7 @@ impl<Pk: MiniscriptKey> ForEachKey<Pk> for Tr<Pk> {
         let script_keys_res = self
             .iter_scripts()
             .all(|(_d, ms)| ms.for_each_key(&mut pred));
-        script_keys_res && pred(ForEach(&self.internal_key))
+        script_keys_res && pred(ForEach(&KeyExpr::SingleKey(self.internal_key.clone())))
     }
 }
 

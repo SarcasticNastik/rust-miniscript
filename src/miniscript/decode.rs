@@ -122,6 +122,16 @@ enum NonTerm {
     // could be or_i or tern
     EndIfElse,
 }
+
+/// KeyExpr := MiniscriptKey | MuSig Aggregation Key
+#[allow(broken_intra_doc_links)]
+pub enum KeyExpr<Pk: MiniscriptKey> {
+    /// Single Public Key
+    SingleKey(Pk),
+    /// Aggregation of respective keys
+    MuSig(Vec<KeyExpr<Pk>>),
+}
+
 /// All AST elements
 #[allow(broken_intra_doc_links)]
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -132,9 +142,9 @@ pub enum Terminal<Pk: MiniscriptKey, Ctx: ScriptContext> {
     False,
     // pubkey checks
     /// `<key>`
-    PkK(Pk),
+    PkK(KeyExpr<Pk>),
     /// `DUP HASH160 <keyhash> EQUALVERIFY`
-    PkH(Pk),
+    PkH(KeyExpr<Pk>),
     /// Only for Parsing PkH
     RawPkH(Pk::Hash),
     // timelocks
@@ -190,9 +200,9 @@ pub enum Terminal<Pk: MiniscriptKey, Ctx: ScriptContext> {
     /// [E] ([W] ADD)* k EQUAL
     Thresh(usize, Vec<Arc<Miniscript<Pk, Ctx>>>),
     /// k (<key>)* n CHECKMULTISIG
-    Multi(usize, Vec<Pk>),
+    Multi(usize, Vec<KeyExpr<Pk>>),
     /// <key> CHECKSIG (<key> CHECKSIGADD)*(n-1) k NUMEQUAL
-    MultiA(usize, Vec<Pk>),
+    MultiA(usize, Vec<KeyExpr<Pk>>),
 }
 
 macro_rules! match_token {

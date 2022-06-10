@@ -23,7 +23,7 @@ use core::str::FromStr;
 use bitcoin::blockdata::script;
 
 use crate::miniscript::context::ScriptContext;
-use crate::miniscript::decode::Terminal;
+use crate::miniscript::decode::{KeyExpr, Terminal};
 use crate::miniscript::limits::MAX_PUBKEYS_PER_MULTISIG;
 use crate::prelude::*;
 use crate::{
@@ -55,7 +55,12 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> SortedMultiVec<Pk, Ctx> {
         // Check the limits before creating a new SortedMultiVec
         // For example, under p2sh context the scriptlen can only be
         // upto 520 bytes.
-        let term: miniscript::decode::Terminal<Pk, Ctx> = Terminal::Multi(k, pks.clone());
+        let term: miniscript::decode::Terminal<Pk, Ctx> = Terminal::Multi(
+            k,
+            pks.iter()
+                .map(|pk| KeyExpr::<Pk>::SingleKey(pk.clone()))
+                .collect(),
+        );
         let ms = Miniscript::from_ast(term)?;
 
         // This would check all the consensus rules for p2sh/p2wsh and
@@ -117,16 +122,21 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> ForEachKey<Pk> for SortedMultiVec<Pk
         Pk: 'a,
         Pk::Hash: 'a,
     {
-        self.pks.iter().all(|key| pred(ForEach(key)))
+        self.pks.iter().all(|key| pred(ForEach(&KeyExpr::SingleKey(key.clone()))))
     }
 }
 
 impl<Pk: MiniscriptKey, Ctx: ScriptContext> SortedMultiVec<Pk, Ctx> {
     /// utility function to sanity a sorted multi vec
     pub fn sanity_check(&self) -> Result<(), Error> {
-        let ms: Miniscript<Pk, Ctx> =
-            Miniscript::from_ast(Terminal::Multi(self.k, self.pks.clone()))
-                .expect("Must typecheck");
+        let ms: Miniscript<Pk, Ctx> = Miniscript::from_ast(Terminal::Multi(
+            self.k,
+            self.pks
+                .iter()
+                .map(|pk| KeyExpr::<Pk>::SingleKey(pk.clone()))
+                .collect(),
+        ))
+        .expect("Must typecheck");
         // '?' for doing From conversion
         ms.sanity_check()?;
         Ok(())
@@ -148,7 +158,12 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> SortedMultiVec<Pk, Ctx> {
                 .partial_cmp(&b.to_public_key().inner.serialize())
                 .unwrap()
         });
-        Terminal::Multi(self.k, pks)
+        Terminal::Multi(
+            self.k,
+            pks.iter()
+                .map(|pk| KeyExpr::<Pk>::SingleKey(pk.clone()))
+                .collect(),
+        )
     }
 
     /// Encode as a Bitcoin script

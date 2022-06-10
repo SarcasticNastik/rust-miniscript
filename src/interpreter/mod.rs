@@ -28,6 +28,7 @@ use bitcoin::util::{sighash, taproot};
 use bitcoin::{self, secp256k1, TxOut};
 
 use crate::miniscript::context::NoChecks;
+use crate::miniscript::decode::KeyExpr;
 use crate::miniscript::ScriptContext;
 use crate::prelude::*;
 use crate::{Descriptor, Miniscript, Terminal, ToPublicKey};
@@ -590,17 +591,27 @@ where
                 Terminal::PkK(ref pk) => {
                     debug_assert_eq!(node_state.n_evaluated, 0);
                     debug_assert_eq!(node_state.n_satisfied, 0);
-                    let res = self.stack.evaluate_pk(&mut self.verify_sig, pk);
-                    if res.is_some() {
-                        return res;
-                    }
+                    if let &KeyExpr::SingleKey(key) = pk {
+                        let res = self.stack.evaluate_pk(&mut self.verify_sig, &key);
+                        if res.is_some() {
+                            return res;
+                        }
+                    } else {
+                        // MuSig
+                        unreachable!();
+                    };
                 }
                 Terminal::PkH(ref pk) => {
                     debug_assert_eq!(node_state.n_evaluated, 0);
                     debug_assert_eq!(node_state.n_satisfied, 0);
-                    let res = self.stack.evaluate_pk(&mut self.verify_sig, pk);
-                    if res.is_some() {
-                        return res;
+                    match &pk {
+                        KeyExpr::SingleKey(ref key) => {
+                            let res = self.stack.evaluate_pk(&mut self.verify_sig, key);
+                            if res.is_some() {
+                                return res;
+                            }
+                        },
+                        KeyExpr::MuSig(ref _subs) => todo!(),
                     }
                 }
                 Terminal::RawPkH(ref pkh) => {
@@ -863,33 +874,38 @@ where
                         // evaluate each key with as a pk
                         // note that evaluate_pk will error on non-empty incorrect sigs
                         // push 1 on satisfied sigs and push 0 on empty sigs
-                        match self
-                            .stack
-                            .evaluate_pk(&mut self.verify_sig, &subs[node_state.n_evaluated])
-                        {
-                            Some(Ok(x)) => {
-                                self.push_evaluation_state(
-                                    node_state.node,
-                                    node_state.n_evaluated + 1,
-                                    node_state.n_satisfied + 1,
-                                );
-                                match self.stack.pop() {
-                                    Some(..) => return Some(Ok(x)),
-                                    None => return Some(Err(Error::UnexpectedStackEnd)),
+                        match &subs[node_state.n_evaluated] {
+                            KeyExpr::SingleKey(key) => {
+                                match self
+                                    .stack
+                                    .evaluate_pk(&mut self.verify_sig, &key)
+                                {
+                                    Some(Ok(x)) => {
+                                        self.push_evaluation_state(
+                                            node_state.node,
+                                            node_state.n_evaluated + 1,
+                                            node_state.n_satisfied + 1,
+                                        );
+                                        match self.stack.pop() {
+                                            Some(..) => return Some(Ok(x)),
+                                            None => return Some(Err(Error::UnexpectedStackEnd)),
+                                        }
+                                    }
+                                    None => {
+                                        self.push_evaluation_state(
+                                            node_state.node,
+                                            node_state.n_evaluated + 1,
+                                            node_state.n_satisfied,
+                                        );
+                                        match self.stack.pop() {
+                                            Some(..) => {} // not-satisfied, look for next key
+                                            None => return Some(Err(Error::UnexpectedStackEnd)),
+                                        }
+                                    }
+                                    x => return x, //forward errors as is
                                 }
-                            }
-                            None => {
-                                self.push_evaluation_state(
-                                    node_state.node,
-                                    node_state.n_evaluated + 1,
-                                    node_state.n_satisfied,
-                                );
-                                match self.stack.pop() {
-                                    Some(..) => {} // not-satisfied, look for next key
-                                    None => return Some(Err(Error::UnexpectedStackEnd)),
-                                }
-                            }
-                            x => return x, //forward errors as is
+                            },
+                            KeyExpr::MuSig(ref _subs) => todo!(),
                         }
                     }
                 }
@@ -917,24 +933,29 @@ where
                             }
                             None => return Some(Err(Error::UnexpectedStackEnd)),
                             _ => {
-                                match self
-                                    .stack
-                                    .evaluate_multi(&mut self.verify_sig, &subs[subs.len() - 1])
-                                {
-                                    Some(Ok(x)) => {
-                                        self.push_evaluation_state(
-                                            node_state.node,
-                                            node_state.n_evaluated + 1,
-                                            node_state.n_satisfied + 1,
-                                        );
-                                        return Some(Ok(x));
-                                    }
-                                    None => self.push_evaluation_state(
-                                        node_state.node,
-                                        node_state.n_evaluated + 1,
-                                        node_state.n_satisfied,
-                                    ),
-                                    x => return x, //forward errors as is
+                                match &subs[subs.len() - 1] {
+                                    KeyExpr::SingleKey(key) => {
+                                        match self
+                                            .stack
+                                            .evaluate_multi(&mut self.verify_sig, &key)
+                                        {
+                                            Some(Ok(x)) => {
+                                                self.push_evaluation_state(
+                                                    node_state.node,
+                                                    node_state.n_evaluated + 1,
+                                                    node_state.n_satisfied + 1,
+                                                );
+                                                return Some(Ok(x));
+                                            }
+                                            None => self.push_evaluation_state(
+                                                node_state.node,
+                                                node_state.n_evaluated + 1,
+                                                node_state.n_satisfied,
+                                            ),
+                                            x => return x, //forward errors as is
+                                        }
+                                    },
+                                    KeyExpr::MuSig(ref _subs) => todo!(),
                                 }
                             }
                         }
@@ -951,24 +972,26 @@ where
                     } else if node_state.n_evaluated == subs.len() {
                         return Some(Err(Error::MultiSigEvaluationError));
                     } else {
-                        match self.stack.evaluate_multi(
-                            &mut self.verify_sig,
-                            &subs[subs.len() - node_state.n_evaluated - 1],
-                        ) {
-                            Some(Ok(x)) => {
-                                self.push_evaluation_state(
-                                    node_state.node,
-                                    node_state.n_evaluated + 1,
-                                    node_state.n_satisfied + 1,
-                                );
-                                return Some(Ok(x));
-                            }
-                            None => self.push_evaluation_state(
-                                node_state.node,
-                                node_state.n_evaluated + 1,
-                                node_state.n_satisfied,
-                            ),
-                            x => return x, //forward errors as is
+                        match &subs[subs.len() - node_state.n_evaluated - 1] {
+                            KeyExpr::SingleKey(key) => {
+                                match self.stack.evaluate_multi(&mut self.verify_sig, &key) {
+                                    Some(Ok(x)) => {
+                                        self.push_evaluation_state(
+                                            node_state.node,
+                                            node_state.n_evaluated + 1,
+                                            node_state.n_satisfied + 1,
+                                        );
+                                        return Some(Ok(x));
+                                    }
+                                    None => self.push_evaluation_state(
+                                        node_state.node,
+                                        node_state.n_evaluated + 1,
+                                        node_state.n_satisfied,
+                                    ),
+                                    x => return x, //forward errors as is
+                                }
+                            },
+                            KeyExpr::MuSig(ref _subs) => todo!(),
                         }
                     }
                 }

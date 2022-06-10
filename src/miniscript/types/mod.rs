@@ -95,6 +95,8 @@ pub enum ErrorKind {
         /// Number of strong children
         n_strong: usize,
     },
+    /// RawPkH can only be used for parsing
+    RawPkHParseOnly,
 }
 
 /// Error type for typechecking
@@ -211,6 +213,11 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> fmt::Display for Error<Pk, Ctx> {
                 n - k,
                 n_strong,
             ),
+            ErrorKind::RawPkHParseOnly => write!(
+                f,
+                "fragment «{}» is a RawPkH which should only be used when parsing from string",
+                self.fragment
+            )
         }
     }
 }
@@ -413,7 +420,11 @@ pub trait Property: Sized {
             Terminal::True => Ok(Self::from_true()),
             Terminal::False => Ok(Self::from_false()),
             Terminal::PkK(..) => Ok(Self::from_pk_k::<Ctx>()),
-            Terminal::PkH(..) => Ok(Self::from_pk_h::<Ctx>()),
+            Terminal::PkH(..) | Terminal::RawPkH(..) => Ok(Self::from_pk_h::<Ctx>()),
+            // Terminal::RawPkH(..) => Err(Error {
+            //     fragment: fragment.clone(),
+            //     error: ErrorKind::RawPkHParseOnly,
+            // }),
             Terminal::Multi(k, ref pks) | Terminal::MultiA(k, ref pks) => {
                 if k == 0 {
                     return Err(Error {
@@ -796,7 +807,11 @@ impl Property for Type {
             Terminal::True => Ok(Self::from_true()),
             Terminal::False => Ok(Self::from_false()),
             Terminal::PkK(..) => Ok(Self::from_pk_k::<Ctx>()),
-            Terminal::PkH(..) => Ok(Self::from_pk_h::<Ctx>()),
+            Terminal::PkH(..) | Terminal::RawPkH(..) => Ok(Self::from_pk_h::<Ctx>()),
+            // Terminal::RawPkH(..) => Err(Error {
+            //     fragment: fragment.clone(),
+            //     error: ErrorKind::RawPkHParseOnly,
+            // }),
             Terminal::Multi(k, ref pks) | Terminal::MultiA(k, ref pks) => {
                 if k == 0 {
                     return Err(Error {

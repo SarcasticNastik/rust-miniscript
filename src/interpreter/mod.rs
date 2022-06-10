@@ -595,7 +595,15 @@ where
                         return res;
                     }
                 }
-                Terminal::PkH(ref pkh) => {
+                Terminal::PkH(ref pk) => {
+                    debug_assert_eq!(node_state.n_evaluated, 0);
+                    debug_assert_eq!(node_state.n_satisfied, 0);
+                    let res = self.stack.evaluate_pk(&mut self.verify_sig, pk);
+                    if res.is_some() {
+                        return res;
+                    }
+                }
+                Terminal::RawPkH(ref pkh) => {
                     debug_assert_eq!(node_state.n_evaluated, 0);
                     debug_assert_eq!(node_state.n_satisfied, 0);
                     let res = self.stack.evaluate_pkh(&mut self.verify_sig, pkh);

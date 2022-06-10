@@ -58,7 +58,9 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Miniscript<Pk, Ctx> {
     /// them.
     pub fn branches(&self) -> Vec<&Miniscript<Pk, Ctx>> {
         match self.node {
-            Terminal::PkK(_) | Terminal::PkH(_) | Terminal::Multi(_, _) => vec![],
+            Terminal::PkK(_) | Terminal::PkH(_) | Terminal::RawPkH(_) | Terminal::Multi(_, _) => {
+                vec![]
+            }
 
             Terminal::Alt(ref node)
             | Terminal::Swap(ref node)
@@ -140,8 +142,8 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Miniscript<Pk, Ctx> {
     /// for example `miniscript.iter_pubkey_hashes().collect()`.
     pub fn get_leapkh(&self) -> Vec<Pk::Hash> {
         match self.node {
-            Terminal::PkH(ref hash) => vec![hash.clone()],
-            Terminal::PkK(ref key) => vec![key.to_pubkeyhash()],
+            Terminal::RawPkH(ref hash) => vec![hash.clone()],
+            Terminal::PkK(ref key) | Terminal::PkH(ref key) => vec![key.to_pubkeyhash()],
             Terminal::Multi(_, ref keys) | Terminal::MultiA(_, ref keys) => {
                 keys.iter().map(Pk::to_pubkeyhash).collect()
             }
@@ -158,7 +160,8 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Miniscript<Pk, Ctx> {
     /// function, for example `miniscript.iter_pubkeys_and_hashes().collect()`.
     pub fn get_leapk_pkh(&self) -> Vec<PkPkh<Pk>> {
         match self.node {
-            Terminal::PkH(ref hash) => vec![PkPkh::HashedPubkey(hash.clone())],
+            Terminal::RawPkH(ref hash) => vec![PkPkh::HashedPubkey(hash.clone())],
+            Terminal::PkH(ref key) => vec![PkPkh::HashedPubkey(key.to_pubkeyhash())],
             Terminal::PkK(ref key) => vec![PkPkh::PlainPubkey(key.clone())],
             Terminal::Multi(_, ref keys) | Terminal::MultiA(_, ref keys) => keys
                 .iter()
@@ -191,8 +194,10 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Miniscript<Pk, Ctx> {
     /// NB: The function analyzes only single miniscript item and not any of its descendants in AST.
     pub fn get_nth_pkh(&self, n: usize) -> Option<Pk::Hash> {
         match (&self.node, n) {
-            (&Terminal::PkH(ref hash), 0) => Some(hash.clone()),
-            (&Terminal::PkK(ref key), 0) => Some(key.to_pubkeyhash()),
+            (&Terminal::RawPkH(ref hash), 0) => Some(hash.clone()),
+            (&Terminal::PkK(ref key), 0) | (&Terminal::PkH(ref key), 0) => {
+                Some(key.to_pubkeyhash())
+            }
             (&Terminal::Multi(_, ref keys), _) | (&Terminal::MultiA(_, ref keys), _) => {
                 keys.get(n).map(Pk::to_pubkeyhash)
             }
@@ -206,7 +211,8 @@ impl<Pk: MiniscriptKey, Ctx: ScriptContext> Miniscript<Pk, Ctx> {
     /// NB: The function analyzes only single miniscript item and not any of its descendants in AST.
     pub fn get_nth_pk_pkh(&self, n: usize) -> Option<PkPkh<Pk>> {
         match (&self.node, n) {
-            (&Terminal::PkH(ref hash), 0) => Some(PkPkh::HashedPubkey(hash.clone())),
+            (&Terminal::RawPkH(ref hash), 0) => Some(PkPkh::HashedPubkey(hash.clone())),
+            (&Terminal::PkH(ref key), 0) => Some(PkPkh::HashedPubkey(key.to_pubkeyhash())),
             (&Terminal::PkK(ref key), 0) => Some(PkPkh::PlainPubkey(key.clone())),
             (&Terminal::Multi(_, ref keys), _) | (&Terminal::MultiA(_, ref keys), _) => {
                 keys.get(n).map(|key| PkPkh::PlainPubkey(key.clone()))

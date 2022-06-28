@@ -51,7 +51,7 @@ sha256t_hash_newtype!(
     MIDSTATE,
     64,
     doc = "BIP322 message tagged hash",
-    true
+    false
 );
 
 /// BIP322 Error types

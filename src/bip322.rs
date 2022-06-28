@@ -19,9 +19,6 @@
 //! `https://github.com/bitcoin/bips/blob/master/bip-0322.mediawiki`
 //!
 
-use std::collections::HashMap;
-use std::convert::From;
-
 use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::script::Builder;
 use bitcoin::hashes::{
@@ -33,10 +30,10 @@ use bitcoin::secp256k1::ecdsa::Signature;
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::util::sighash;
 use bitcoin::{EcdsaSighashType, OutPoint, PublicKey, Transaction, TxIn, TxOut};
-use crate::{MiniscriptKey, ToPublicKey};
 
+use super::hash256;
 use super::interpreter::{Error as InterpreterError, Interpreter};
-use super::{hash256, Descriptor};
+use crate::prelude::*;
 
 // BIP322 message tagged hash midstate
 const MIDSTATE: [u8; 32] = [
@@ -62,6 +59,15 @@ pub enum BIP322Error {
 
     /// Signature Validation Error
     ValidationError(InterpreterError),
+
+    /// Signing Error
+    MalformedSecrets,
+
+    /// No addresses provided
+    TooFewAddresses,
+
+    /// Incorrect Message Hash
+    InvalidMessage,
 }
 
 #[doc(hidden)]
@@ -84,12 +90,12 @@ pub enum Bip322Signature {
     Full(Transaction),
 }
 
-/// TODO: Bip322 Signer structure
+/// TODO: BIP322 Signer structure
 /// Update a Psbt with signatures required for signatures.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Bip322SignerSecrets<Pk: MiniscriptKey + ToPublicKey> {
+pub struct Bip322SignerSecrets {
     // Descriptor with secret keys
-    desc: Descriptor<Pk>, // parse with secrets
+    desc: Vec<(String, Range<u32>)>, // Descriptor BIP32-keys
     // sha256 Preimages
     sha256_preimages: HashMap<sha256::Hash, [u8; 32]>,
     // hash256 preimages
@@ -102,30 +108,50 @@ pub struct Bip322SignerSecrets<Pk: MiniscriptKey + ToPublicKey> {
 
 /// Bip322 Signer that supports single and multiple Utxos
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Bip322Signer<Pk: MiniscriptKey + ToPublicKey> {
+pub struct Bip322Signer {
     /// Age
     pub age: u32,
     /// Height
     pub height: u32,
     /// Script pubkey -> Secrets
-    pub spk_secrets_map: HashMap<bitcoin::Script, Bip322SignerSecrets<Pk>>,
+    pub spk_secrets_map: Bip322SignerSecrets,
 }
 
-impl<Pk: MiniscriptKey + ToPublicKey> Bip322Signer<Pk> {
+impl Bip322Signer {
     /// Creates a signer for proving ownership of single funds
     pub fn new(
         age: u32,
         height: u32,
-        spk_secrets_map: HashMap<bitcoin::Script, Bip322SignerSecrets<Pk>>,
-    ) -> Self {
-        Bip322Signer {
+        spk_secrets_map: Bip322SignerSecrets,
+    ) -> Result<Self, BIP322Error> {
+        if spk_secrets_map.desc.is_empty() {
+            return Err(BIP322Error::TooFewAddresses);
+        }
+        Ok(Bip322Signer {
             age,
             height,
             spk_secrets_map,
-        }
+        })
     }
+    // to_spend {msg_hash}  <- to_sign
+    /// Sign the `to_sign` transaction with secret keys
+    pub fn sign(&self, to_sign: &Transaction, msg: String) -> Result<Bip322Signature, BIP322Error> {
+        // let desc = Descriptor::<DescriptorPublicKey>::from_str(self.spk_secrets_map.desc[0].0)?;
+        // let script_pubkey = desc.script_pubkey();
+        // let to_spend = create_to_spend(&msg, script_pubkey);
 
-    pub fn sign(&self, _msg: String) -> Result<Bip322Signature, ()> {
+        // This `to_sign` transaction acts as the signature
+        // 1. Set all the addresses as required
+
+        // 2. Satisfy the addresses with
+
+        // Ok(Bip322Signature::Full(to_sign))
+        // let secp = Secp256k1::new();
+        // let desc = Descriptor::parse_descriptor(&secp, self.spk_secrets_map.desc.0.0)?;
+        // let script_pubkey = desc.0.script_pubkey();
+        // let to_spend = create_to_spend(&msg, script_pubkey);
+
+        // Satisfy the addresses here
         todo!()
     }
 
@@ -139,7 +165,11 @@ impl<Pk: MiniscriptKey + ToPublicKey> Bip322Signer<Pk> {
     ///
     /// 1) Completed(Bip322Signature)
     /// 2) Insufficient information to finalize. Pass onto the next signer
-    pub fn sign_psbt(&self, _psbt: &mut PartiallySignedTransaction, _msg: String) -> Result<(Bip322Signature, bool), BIP322Error> {
+    pub fn sign_psbt(
+        &self,
+        _psbt: &mut PartiallySignedTransaction,
+        _msg: String,
+    ) -> Result<(Bip322Signature, bool), BIP322Error> {
         todo!("Sanity checks that the descriptor correctly derives the address")
 
         // If the descriptor is BIP32 secret key, then we need to find the index corresponding to the wildcard
@@ -155,193 +185,201 @@ impl<Pk: MiniscriptKey + ToPublicKey> Bip322Signer<Pk> {
     }
 
     /// Create a BIP322Signature from the signing data
-    pub fn finalize_psbt(&self, _psbt: &mut PartiallySignedTransaction, _msg: String) -> Result<Bip322Signature, ()> {
+    pub fn finalize_psbt(
+        &self,
+        _psbt: &mut PartiallySignedTransaction,
+        _msg: String,
+    ) -> Result<Bip322Signature, ()> {
         todo!()
         //Full are the only valid outputs
     }
 }
 
-/// BIP322 validator structure
-/// A standard for interoperable signed messages based on the Bitcoin Script format,
-/// either for proving fund availability, or committing to a message as the intended
-/// recipient of funds sent to the invoice address.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Bip322Validator {
-    /// Message to be signed
-    message: String,
+/// Create a `to_spend` transaction
+pub(crate) fn create_to_spend(script_pubkey: bitcoin::Script, message: &String) -> Transaction {
+    // create default input and output
+    let mut vin = TxIn::default();
+    let mut vout = TxOut::default();
 
-    /// Signature to verify the message
-    signature: Bip322Signature,
+    // calculate the message tagged hash
+    let msg_hash = MessageHash::hash(message.as_bytes()).into_inner();
 
-    /// UTXOs to prove control of and/ or sign the message with
-    utxos: Vec<TxOut>,
+    // mutate the input with appropriate script_sig and sequence
+    vin.script_sig = Builder::new()
+        .push_int(0)
+        .push_slice(&msg_hash[..])
+        .into_script();
+    vin.sequence = 0;
 
-    /// Age
-    age: u32,
+    // mutate the value and script_pubkey as appropriate
+    vout.value = 0;
+    vout.script_pubkey = script_pubkey.clone();
 
-    /// Height
-    height: u32,
+    // create and return final transaction
+    Transaction {
+        version: 0,
+        lock_time: 0,
+        input: vec![vin],
+        output: vec![vout],
+    }
 }
 
-impl Bip322Validator {
-    /// Create a new BIP322 validator
-    pub fn new(
-        message: String,
-        signature: Bip322Signature,
-        utxos: Vec<TxOut>,
-        age: u32,
-        height: u32,
-    ) -> Result<Self, BIP322Error> {
-        if utxos.is_empty() {
-            return Err(BIP322Error::InternalError("atleast one utxo to prove control of should be provided".to_string()));
-        }
-        let mut utxos = utxos;
-        utxos[0].value = 0; // The signing address A must have 0 value
-        Ok(Bip322Validator {
-            message,
-            signature,
-            utxos,
-            age,
-            height,
-        })
+/// Create to_sign transaction
+/// This will create a transaction structure with empty signature and witness field
+/// its up to the user of the library to fill the Tx with appropriate signature and witness
+pub(crate) fn empty_to_sign(to_spend: &Transaction, age: u32, height: u32) -> Transaction {
+    let outpoint = OutPoint::new(to_spend.txid(), 0);
+    let mut input = TxIn::default();
+    input.previous_output = outpoint;
+    input.sequence = height;
+
+    // create the output
+    let output = TxOut {
+        value: 0,
+        script_pubkey: Builder::new()
+            .push_opcode(opcodes::all::OP_RETURN)
+            .into_script(),
+    };
+
+    // return resulting transaction
+    Transaction {
+        version: 2,
+        lock_time: age,
+        input: vec![input],
+        output: vec![output],
     }
+}
 
-    /// create the to_spend transaction
-    pub(crate) fn to_spend(&self) -> Transaction {
-        // create default input and output
-        let mut vin = TxIn::default();
-        let mut vout = TxOut::default();
-
-        // calculate the message tagged hash
-        let msg_hash = MessageHash::hash(&self.message.as_bytes()).into_inner();
-
-        // mutate the input with appropriate script_sig and sequence
-        vin.script_sig = Builder::new()
-            .push_int(0)
-            .push_slice(&msg_hash[..])
-            .into_script();
-        vin.sequence = 0;
-
-        // mutate the value and script_pubkey as appropriate
-        vout.value = 0;
-        vout.script_pubkey = self.utxos[0].script_pubkey.clone();
-
-        // create and return final transaction
-        Transaction {
-            version: 0,
-            lock_time: 0,
-            input: vec![vin],
-            output: vec![vout],
-        }
+/// Validate a BIP322 Signature against the message and challenge script
+/// Age: for the first input
+/// Height: for the first input
+/// * Outpoints could be fake.
+/// * Can't check whether the funds are spent or not (no access to blockchain)
+/// * txout: Set of addresses to prove control of
+pub fn verify(
+    txout: Vec<TxOut>,
+    signature: Bip322Signature,
+    message: String,
+    age: u32,
+    height: u32,
+) -> Result<bool, BIP322Error> {
+    // Atleast one address of prove control of should exist
+    if txout.is_empty() {
+        return Err(BIP322Error::TooFewAddresses);
     }
-
-    /// Create to_sign transaction
-    /// This will create a transaction structure with empty signature and witness field
-    /// its up to the user of the library to fill the Tx with appropriate signature and witness
-    pub(crate) fn empty_to_sign(&self) -> Transaction {
-        // create the appropriate input
-        let outpoint = OutPoint::new(self.to_spend().txid(), 0);
-        let mut input = TxIn::default();
-        input.previous_output = outpoint;
-        input.sequence = self.height;
-
-        // create the output
-        let output = TxOut {
-            value: 0,
-            script_pubkey: Builder::new()
-                .push_opcode(opcodes::all::OP_RETURN)
-                .into_script(),
-        };
-
-        // return resulting transaction
-        Transaction {
-            version: 2,
-            lock_time: self.age,
-            input: vec![input],
-            output: vec![output],
+    let address = txout[0].script_pubkey.clone();
+    // We should check that OutPoints are all different (no double spending, duh!)
+    match &signature {
+        // A Full signature can be validated directly against the `to_sign` transaction
+        // How do we get `to_spend` here. RPC call?
+        Bip322Signature::Full(to_sign) => {
+            let to_spend = create_to_spend(address, &message);
+            tx_verify(&to_spend, to_sign, message, txout)
         }
-    }
 
-    /// Validate a BIP322 Signature against the message and challenge script
-    /// This will require a BIP322Signature inside the structure
-    pub fn validate(&self) -> Result<bool, BIP322Error> {
-        match &self.signature {
-            // A Full signature can be validated directly against the `to_sign` transaction
-            Bip322Signature::Full(to_sign) => self.tx_validation(to_sign),
-
-            // If Simple Signature is provided, the resulting `to_sign` Tx will be computed
-            Bip322Signature::Simple(witness) => {
-                if !self.utxos[0].script_pubkey.is_witness_program() {
-                    return Err(BIP322Error::InternalError("Simple style signature is only applicable for Segwit type message_challenge".to_string()));
-                } else {
-                    // create empty to_sign transaction
-                    let mut to_sign = self.empty_to_sign();
-
-                    to_sign.input[0].witness = bitcoin::Witness::from_vec(witness.to_owned());
-
-                    self.tx_validation(&to_sign)
-                }
-            }
-
-            // Legacy Signature can only be used to validate against P2PKH message_challenge
-            Bip322Signature::Legacy(sig, pubkey) => {
-                if !self.utxos[0].script_pubkey.is_p2pkh() {
-                    return Err(BIP322Error::InternalError(
-                        "Legacy style signature is only applicable for P2PKH message_challenge"
-                            .to_string(),
-                    ));
-                } else {
-                    let mut sig_ser = sig.serialize_der()[..].to_vec();
-
-                    // By default SigHashType is ALL
-                    sig_ser.push(EcdsaSighashType::All as u8);
-
-                    let script_sig = Builder::new()
-                        .push_slice(&sig_ser[..])
-                        .push_key(&pubkey)
-                        .into_script();
-
-                    let mut to_sign = self.empty_to_sign();
-
-                    to_sign.input[0].script_sig = script_sig;
-
-                    self.tx_validation(&to_sign)
-                }
-            }
-        }
-    }
-
-    // Internal helper function to perform transaction validation
-    // - Validation of first transaction using first input of to_sign
-    // - Rest validation using out_transactions for secret_data of rest transactions
-    fn tx_validation(&self, to_sign: &Transaction) -> Result<bool, BIP322Error> {
-        let secp = Secp256k1::new();
-
-        // create an Interpreter to validate to_spend transaction
-        let interpreter = Interpreter::from_txdata(
-            &self.utxos[0].script_pubkey,
-            &to_sign.input[0].script_sig,
-            &to_sign.input[0].witness,
-            self.age,
-            self.height,
-        )?;
-
-        let txout : &Vec<TxOut> = &self.utxos;
-        let prevouts = sighash::Prevouts::<TxOut>::All(txout);
-
-        let mut result = false;
-
-        for idx in 0..txout.len() {
-            for elem in interpreter.iter(&secp, &to_sign, idx, &prevouts) {
-                match elem {
-                    Ok(_) => result = true,
-                    Err(e) => return Err(BIP322Error::ValidationError(e)),
-                }
+        // If Simple Signature is provided, the resulting `to_sign` Tx will be computed
+        Bip322Signature::Simple(witness) => {
+            let to_spend = create_to_spend(address, &message);
+            let script_pubkey = &to_spend.output[0].script_pubkey;
+            if !script_pubkey.is_witness_program() {
+                return Err(BIP322Error::InternalError(
+                    "Simple style signature is only applicable for Segwit type message_challenge"
+                        .to_string(),
+                ));
+            } else {
+                // create empty to_sign transaction
+                let mut to_sign = empty_to_sign(&to_spend, age, height);
+                to_sign.input[0].witness = bitcoin::Witness::from_vec(witness.to_owned());
+                tx_verify(&to_spend, &to_sign, message, txout)
             }
         }
 
-        Ok(result)
+        // Legacy Signature can only be used to validate against P2PKH message_challenge
+        Bip322Signature::Legacy(sig, pubkey) => {
+            let to_spend = create_to_spend(address, &message);
+            let script_pubkey = &to_spend.output[0].script_pubkey;
+            if !script_pubkey.is_p2pkh() {
+                return Err(BIP322Error::InternalError(
+                    "Legacy style signature is only applicable for P2PKH message_challenge"
+                        .to_string(),
+                ));
+            } else {
+                let mut sig_ser = sig.serialize_der()[..].to_vec();
+                sig_ser.push(EcdsaSighashType::All as u8);
+                let script_sig = Builder::new()
+                    .push_slice(&sig_ser[..])
+                    .push_key(&pubkey)
+                    .into_script();
+                let mut to_sign = empty_to_sign(&to_spend, age, height);
+                to_sign.input[0].script_sig = script_sig;
+                tx_verify(&to_spend, &to_sign, message, txout)
+            }
+        }
     }
+}
+
+/// * Outpoints could be fake.
+/// * Can't check whether the funds are spent or not (no access to blockchain)
+fn tx_verify(
+    to_spend: &Transaction,
+    to_sign: &Transaction,
+    msg: String,
+    txout: Vec<TxOut>,
+) -> Result<bool, BIP322Error> {
+    let secp = Secp256k1::new();
+
+    // BIP322 checks
+    if to_sign.input[0].previous_output.txid != to_spend.txid() {
+        return Err(BIP322Error::InternalError(
+            "to_sign doesn't sign to_spend".to_string(),
+        ));
+    }
+    if to_sign.input.is_empty() || to_sign.output.len() != 1 {
+        return Err(BIP322Error::InternalError(
+            "Improper transaction structure for to_sign".to_string(),
+        ));
+    }
+
+    let script_pubkey = &to_spend.output[0].script_pubkey;
+    let age = to_sign.input[0].sequence;
+    let height = to_sign.lock_time;
+
+    // Check against hash
+    let msg_hash = MessageHash::hash(&msg.as_bytes()).into_inner();
+    let expected_scriptsig = Builder::new()
+        .push_int(0)
+        .push_slice(&msg_hash[..])
+        .into_script();
+
+    if expected_scriptsig != to_spend.input[0].script_sig {
+        return Err(BIP322Error::InvalidMessage);
+    }
+
+    // We can't argue about SEQUENCE_NUM are correct or not (no access to blockchain),
+    // additional checks need to be taken care of.
+    let interpreter = Interpreter::from_txdata(
+        &script_pubkey,
+        &to_sign.input[0].script_sig,
+        &to_sign.input[0].witness,
+        age,
+        height,
+    )?;
+
+    // FIXME: Consider verification over all the inputs
+    let prevouts = sighash::Prevouts::<TxOut>::All(&txout);
+
+    let mut result = true;
+
+    for idx in 0..txout.len() {
+        for elem in interpreter.iter(&secp, &to_sign, idx, &prevouts) {
+            match elem {
+                Ok(_) => {}
+                Err(e) => result = false,
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -352,6 +390,7 @@ mod test {
     use bitcoin::{EcdsaSighashType, PrivateKey};
 
     use super::*;
+    use crate::Descriptor;
 
     #[test]
     fn test_bip322_validation() {
@@ -368,7 +407,6 @@ mod test {
         // Corresponding p2pkh script. used for sighash calculation
         let p2pkh_script = bitcoin::Script::new_p2pkh(&pk.pubkey_hash());
 
-        // let message = String::new();
         let message = "Hello World".to_string();
         let age = 0;
         let height = 0;
@@ -380,7 +418,7 @@ mod test {
             let mut vout = TxOut::default();
 
             // calculate the message tagged hash
-            let msg_hash = dbg!(MessageHash::hash(message.as_bytes())).into_inner();
+            let msg_hash = MessageHash::hash(message.as_bytes()).into_inner();
 
             // mutate the input with appropriate script_sig and sequence
             vin.script_sig = Builder::new()
@@ -403,7 +441,7 @@ mod test {
         };
 
         // create an empty to_sign transaction
-        let mut empty_to_sign = {
+        let mut to_sign_empty = {
             // create the appropriate input
             let outpoint = OutPoint::new(to_spend.txid(), 0);
             let mut input = TxIn::default();
@@ -431,7 +469,7 @@ mod test {
         // Check BIP322Signature::FUll
 
         // Generate witness for above wpkh pubkey
-        let mut sighash_cache = bitcoin::util::sighash::SighashCache::new(&empty_to_sign);
+        let mut sighash_cache = bitcoin::util::sighash::SighashCache::new(&to_sign_empty);
         let message =
             sighash_cache.segwit_signature_hash(0, &p2pkh_script, 0, EcdsaSighashType::All);
         let message = Message::from_slice(&message.unwrap()).unwrap();
@@ -442,31 +480,42 @@ mod test {
         sig_with_hash.push(EcdsaSighashType::All as u8);
 
         let witness: Vec<Vec<u8>> = vec![sig_with_hash, pk.to_bytes()];
-        empty_to_sign.input[0].witness = bitcoin::Witness::from_vec(witness.clone());
+        to_sign_empty.input[0].witness = bitcoin::Witness::from_vec(witness.clone());
 
-        let bip322_signature = Bip322Signature::Full(empty_to_sign);
+        let bip322_signature = Bip322Signature::Full(to_sign_empty);
 
-        // Create BIP322 Validator
-        let bip322_1 = Bip322Validator {
-            message: "Hello World".to_string(),
-            utxos: vec![TxOut {value: 0, script_pubkey: desc.script_pubkey()}],
-            signature: bip322_signature,
-            age: 0,
-            height: 0,
-        };
-        let mut bip322_2 = bip322_1.clone();
-        let mut bip322_3 = bip322_1.clone();
+        let expected_message = "Hello World".to_string();
+        let expected_address = desc.script_pubkey();
+        let expected_age = 0;
+        let expected_height = 0;
 
         // Check validation
-        assert_eq!(bip322_1.validate().unwrap(), true);
+        assert!(verify(
+            vec![TxOut {
+                value: 0,
+                script_pubkey: expected_address.clone()
+            }],
+            bip322_signature,
+            expected_message.clone(),
+            expected_age,
+            expected_height
+        )
+        .unwrap());
 
         // ------------------------------------------------------------
         // Check Bip322Signature::Simple
 
-        // Same structure can be validated with Simple type signature
-        bip322_2.signature = Bip322Signature::Simple(witness);
-
-        assert_eq!(bip322_2.validate().unwrap(), true);
+        assert!(verify(
+            vec![TxOut {
+                value: 0,
+                script_pubkey: expected_address
+            }],
+            Bip322Signature::Simple(witness),
+            expected_message.clone(),
+            expected_age,
+            expected_height
+        )
+        .unwrap());
 
         // ------------------------------------------------------------
         // Check Bip322Signature::Legacy
@@ -474,12 +523,11 @@ mod test {
         let desc = Descriptor::new_pkh(pk);
 
         // Replace previous message_challenge with p2pkh
-        bip322_3.utxos = vec![TxOut {value: 0, script_pubkey: desc.script_pubkey()}];
+        let address = desc.script_pubkey();
+        let to_spend = create_to_spend(address.clone(), &expected_message);
 
-        // Create empty to_sign
-        let to_sign = bip322_3.empty_to_sign();
+        let to_sign = empty_to_sign(&to_spend, expected_age, expected_height);
 
-        // Compute SigHash and Signature
         let message =
             to_sign.signature_hash(0, &desc.script_pubkey(), EcdsaSighashType::All as u32);
         let message = Message::from_slice(&message[..]).unwrap();
@@ -487,10 +535,18 @@ mod test {
 
         // Create Bip322Signature::Legacy
         let bip322_sig = Bip322Signature::Legacy(signature, pk);
-        bip322_3.signature = bip322_sig;
 
-        // Check validation
-        assert_eq!(bip322_3.validate().unwrap(), true);
+        assert!(verify(
+            vec![TxOut {
+                value: 0,
+                script_pubkey: address
+            }],
+            bip322_sig,
+            expected_message,
+            expected_age,
+            expected_height
+        )
+        .unwrap());
     }
 
     #[test]

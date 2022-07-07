@@ -88,7 +88,7 @@
 #![deny(unused_mut)]
 #![deny(dead_code)]
 #![deny(unused_imports)]
-// #![deny(missing_docs)]
+#![deny(missing_docs)]
 
 pub use bitcoin;
 
@@ -1116,8 +1116,8 @@ mod prelude {
     pub use alloc::{
         borrow::{Borrow, Cow, ToOwned},
         boxed::Box,
-        collections::{vec_deque::VecDeque, BTreeMap, BinaryHeap},
-        ops::Range,
+        collections::btree_set::Range,
+        collections::{vec_deque::VecDeque, BTreeMap, BTreeSet, BinaryHeap},
         rc, slice,
         string::{String, ToString},
         sync,
@@ -1127,7 +1127,7 @@ mod prelude {
     pub use std::{
         borrow::{Borrow, Cow, ToOwned},
         boxed::Box,
-        collections::{vec_deque::VecDeque, BTreeMap, BinaryHeap, HashMap, HashSet},
+        collections::{vec_deque::VecDeque, BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet},
         ops::Range,
         rc, slice,
         string::{String, ToString},

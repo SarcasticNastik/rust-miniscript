@@ -19,6 +19,8 @@
 //! `https://github.com/bitcoin/bips/blob/master/bip-0322.mediawiki`
 //!
 
+use core::fmt;
+
 use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::script::Builder;
 use bitcoin::hashes::{
@@ -54,20 +56,44 @@ sha256t_hash_newtype!(
 /// BIP322 Error types
 #[derive(Debug)]
 pub enum BIP322Error {
-    /// BIP322 Internal Error
-    InternalError(String),
-
     /// Signature Validation Error
     ValidationError(InterpreterError),
 
-    /// Signing Error
-    MalformedSecrets,
+    /// Duplicate address in the provided list of addresses
+    DuplicateAddress,
 
     /// No addresses provided
     TooFewAddresses,
 
-    /// Incorrect Message Hash
-    InvalidMessage,
+    /// Malformed `to_spend` transaction structure
+    MalformedToSpend,
+
+    /// [`BIP322Signature::Legacy`] only used for P2PKH scripts
+    P2PkHLegacyOnly,
+
+    /// [`BIP322Signature::Simple`] only used for Segwitv0 scripts
+    Segwitv0SimpleOnly,
+}
+
+impl fmt::Display for BIP322Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BIP322Error::ValidationError(e) => e.fmt(f),
+            BIP322Error::DuplicateAddress => f.write_str("duplicate address shouldn't be provided"),
+            BIP322Error::TooFewAddresses => {
+                f.write_str("message signing/ proof-of-funds must require atleast one address")
+            }
+            BIP322Error::MalformedToSpend => {
+                f.write_str("to_spend transaction doesn't conform with to_sign as per BIP322")
+            }
+            BIP322Error::P2PkHLegacyOnly => {
+                f.write_str("Legacy style signature is only applicable for P2PKH message_challenge")
+            }
+            BIP322Error::Segwitv0SimpleOnly => f.write_str(
+                "Simple style signature is only applicable for Segwit type message_challenge",
+            ),
+        }
+    }
 }
 
 #[doc(hidden)]
@@ -146,6 +172,7 @@ impl Bip322Signer {
         // 2. Satisfy the addresses with
 
         // Ok(Bip322Signature::Full(to_sign))
+        // ---------------------------------------------------------------------------------------
         // let secp = Secp256k1::new();
         // let desc = Descriptor::parse_descriptor(&secp, self.spk_secrets_map.desc.0.0)?;
         // let script_pubkey = desc.0.script_pubkey();
@@ -155,6 +182,7 @@ impl Bip322Signer {
         todo!()
     }
 
+    /// Create a PSBT structure from the [`Bip322Signer`]
     pub fn create_psbt(&self, _msg: String) -> Result<(), ()> {
         todo!()
     }
@@ -184,7 +212,7 @@ impl Bip322Signer {
         // Try finalize if possible
     }
 
-    /// Create a BIP322Signature from the signing data
+    /// Create a BIP322Signature from the signing data from the provided PSBT structure
     pub fn finalize_psbt(
         &self,
         _psbt: &mut PartiallySignedTransaction,
@@ -195,7 +223,7 @@ impl Bip322Signer {
     }
 }
 
-/// Create a `to_spend` transaction
+/// Create `to_spend` transaction
 pub(crate) fn create_to_spend(script_pubkey: bitcoin::Script, message: &String) -> Transaction {
     // create default input and output
     let mut vin = TxIn::default();
@@ -226,7 +254,7 @@ pub(crate) fn create_to_spend(script_pubkey: bitcoin::Script, message: &String) 
 
 /// Create to_sign transaction
 /// This will create a transaction structure with empty signature and witness field
-/// its up to the user of the library to fill the Tx with appropriate signature and witness
+/// Its up to the user of the library to fill the Tx with appropriate signature and witness
 pub(crate) fn empty_to_sign(to_spend: &Transaction, age: u32, height: u32) -> Transaction {
     let outpoint = OutPoint::new(to_spend.txid(), 0);
     let mut input = TxIn::default();
@@ -251,11 +279,11 @@ pub(crate) fn empty_to_sign(to_spend: &Transaction, age: u32, height: u32) -> Tr
 }
 
 /// Validate a BIP322 Signature against the message and challenge script
-/// Age: for the first input
-/// Height: for the first input
-/// * Outpoints could be fake.
-/// * Can't check whether the funds are spent or not (no access to blockchain)
-/// * txout: Set of addresses to prove control of
+///
+/// # Note:
+///
+/// 1. Provided outpoints could be fake and/ or the specified funds could be already spent. The user of this library needs to take care of these cases.
+/// 2. `age` is specified just for the first transaction.
 pub fn verify(
     txout: Vec<TxOut>,
     signature: Bip322Signature,
@@ -263,46 +291,48 @@ pub fn verify(
     age: u32,
     height: u32,
 ) -> Result<bool, BIP322Error> {
-    // Atleast one address of prove control of should exist
+    /// Checks if `iter` contains all unique elements
+    fn has_unique_elements<T>(iter: T) -> bool
+    where
+        T: IntoIterator,
+        T::Item: Ord,
+    {
+        let mut uniq = BTreeSet::new();
+        iter.into_iter().all(move |x| uniq.insert(x))
+    }
+
     if txout.is_empty() {
         return Err(BIP322Error::TooFewAddresses);
     }
-    let address = txout[0].script_pubkey.clone();
-    // We should check that OutPoints are all different (no double spending, duh!)
+    if !has_unique_elements(txout.iter()) {
+        return Err(BIP322Error::DuplicateAddress);
+    }
+
+    let bip322_address = txout[0].script_pubkey.clone();
     match &signature {
-        // A Full signature can be validated directly against the `to_sign` transaction
-        // How do we get `to_spend` here. RPC call?
         Bip322Signature::Full(to_sign) => {
-            let to_spend = create_to_spend(address, &message);
-            tx_verify(&to_spend, to_sign, message, txout)
+            let to_spend = create_to_spend(bip322_address, &message);
+            verify_message(&to_spend, &to_sign, message, txout)
         }
 
-        // If Simple Signature is provided, the resulting `to_sign` Tx will be computed
         Bip322Signature::Simple(witness) => {
-            let to_spend = create_to_spend(address, &message);
+            let to_spend = create_to_spend(bip322_address, &message);
             let script_pubkey = &to_spend.output[0].script_pubkey;
             if !script_pubkey.is_witness_program() {
-                return Err(BIP322Error::InternalError(
-                    "Simple style signature is only applicable for Segwit type message_challenge"
-                        .to_string(),
-                ));
+                return Err(BIP322Error::Segwitv0SimpleOnly);
             } else {
-                // create empty to_sign transaction
                 let mut to_sign = empty_to_sign(&to_spend, age, height);
                 to_sign.input[0].witness = bitcoin::Witness::from_vec(witness.to_owned());
-                tx_verify(&to_spend, &to_sign, message, txout)
+                verify_message(&to_spend, &to_sign, message, txout)
             }
         }
 
         // Legacy Signature can only be used to validate against P2PKH message_challenge
         Bip322Signature::Legacy(sig, pubkey) => {
-            let to_spend = create_to_spend(address, &message);
+            let to_spend = create_to_spend(bip322_address, &message);
             let script_pubkey = &to_spend.output[0].script_pubkey;
             if !script_pubkey.is_p2pkh() {
-                return Err(BIP322Error::InternalError(
-                    "Legacy style signature is only applicable for P2PKH message_challenge"
-                        .to_string(),
-                ));
+                return Err(BIP322Error::P2PkHLegacyOnly);
             } else {
                 let mut sig_ser = sig.serialize_der()[..].to_vec();
                 sig_ser.push(EcdsaSighashType::All as u8);
@@ -312,51 +342,35 @@ pub fn verify(
                     .into_script();
                 let mut to_sign = empty_to_sign(&to_spend, age, height);
                 to_sign.input[0].script_sig = script_sig;
-                tx_verify(&to_spend, &to_sign, message, txout)
+                verify_message(&to_spend, &to_sign, message, txout)
             }
         }
     }
 }
 
-/// * Outpoints could be fake.
-/// * Can't check whether the funds are spent or not (no access to blockchain)
-fn tx_verify(
+/// Verify if [`Bip322Signature`] signs the provided message as per [BIP322](https://github.com/bitcoin/bips/blob/master/bip-0322.mediawiki)
+///
+/// # Note:
+///
+/// 1. `age` is just specified for the first transaction. The user of this library needs to verify this manually.
+fn verify_message(
     to_spend: &Transaction,
     to_sign: &Transaction,
     msg: String,
     txout: Vec<TxOut>,
 ) -> Result<bool, BIP322Error> {
     let secp = Secp256k1::new();
-
     // BIP322 checks
     if to_sign.input[0].previous_output.txid != to_spend.txid() {
-        return Err(BIP322Error::InternalError(
-            "to_sign doesn't sign to_spend".to_string(),
-        ));
+        return Err(BIP322Error::MalformedToSpend);
     }
     if to_sign.input.is_empty() || to_sign.output.len() != 1 {
-        return Err(BIP322Error::InternalError(
-            "Improper transaction structure for to_sign".to_string(),
-        ));
+        return Err(BIP322Error::MalformedToSpend);
     }
 
     let script_pubkey = &to_spend.output[0].script_pubkey;
     let age = to_sign.input[0].sequence;
     let height = to_sign.lock_time;
-
-    // Check against hash
-    let msg_hash = MessageHash::hash(&msg.as_bytes()).into_inner();
-    let expected_scriptsig = Builder::new()
-        .push_int(0)
-        .push_slice(&msg_hash[..])
-        .into_script();
-
-    if expected_scriptsig != to_spend.input[0].script_sig {
-        return Err(BIP322Error::InvalidMessage);
-    }
-
-    // We can't argue about SEQUENCE_NUM are correct or not (no access to blockchain),
-    // additional checks need to be taken care of.
     let interpreter = Interpreter::from_txdata(
         &script_pubkey,
         &to_sign.input[0].script_sig,
@@ -364,22 +378,23 @@ fn tx_verify(
         age,
         height,
     )?;
-
-    // FIXME: Consider verification over all the inputs
     let prevouts = sighash::Prevouts::<TxOut>::All(&txout);
-
-    let mut result = true;
-
     for idx in 0..txout.len() {
         for elem in interpreter.iter(&secp, &to_sign, idx, &prevouts) {
             match elem {
                 Ok(_) => {}
-                Err(e) => result = false,
+                Err(e) => return Err(BIP322Error::ValidationError(e)),
             }
         }
     }
+    let msg_hash = MessageHash::hash(&msg.as_bytes()).into_inner();
+    let expected_scriptsig = Builder::new()
+        .push_int(0)
+        .push_slice(&msg_hash[..])
+        .into_script();
+    let message_hash_check = expected_scriptsig == to_spend.input[0].script_sig;
 
-    Ok(result)
+    Ok(message_hash_check)
 }
 
 #[cfg(test)]
